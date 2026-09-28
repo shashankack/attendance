@@ -27,6 +27,19 @@ export type Employee = {
   sessionToken: string | null;
 };
 
+export type WorkDay = {
+  weekday: number;
+  working: boolean;
+  startMinutes: number;
+  endMinutes: number;
+};
+
+export type Holiday = {
+  id: string;
+  date: string;
+  name: string;
+};
+
 export type Office = {
   id: string;
   name: string;
@@ -36,6 +49,8 @@ export type Office = {
   timezone: string;
   publicIp: string;
   requireOfficeNetwork: boolean;
+  workDays: WorkDay[];
+  holidays: Holiday[];
 };
 
 export type AttendanceStatus = "PRESENT" | "LATE";

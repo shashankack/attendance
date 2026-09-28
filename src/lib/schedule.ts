@@ -1,0 +1,56 @@
+import type { Holiday, WorkDay } from "./types";
+
+export const weekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+export const weekdayOrder = [1, 2, 3, 4, 5, 6, 0];
+
+export function defaultWorkDays(): WorkDay[] {
+  return weekdayOrder.map((weekday) => ({
+    weekday,
+    working: weekday >= 1 && weekday <= 5,
+    startMinutes: 10 * 60,
+    endMinutes: 18 * 60,
+  }));
+}
+
+export function dateWeekday(date: string) {
+  return new Date(`${date}T12:00:00+05:30`).getDay();
+}
+
+export function workDayFor(date: string, workDays: WorkDay[]) {
+  return workDays.find((day) => day.weekday === dateWeekday(date)) ?? null;
+}
+
+export function holidayOn(date: string, holidays: Holiday[]) {
+  return holidays.find((holiday) => holiday.date === date) ?? null;
+}
+
+export function isExpected(date: string, workDays: WorkDay[], holidays: Holiday[]) {
+  if (holidayOn(date, holidays)) return false;
+  return Boolean(workDayFor(date, workDays)?.working);
+}
+
+export function arrivalStatus(minutes: number, date: string, workDays: WorkDay[], holidays: Holiday[]) {
+  if (!isExpected(date, workDays, holidays)) return "PRESENT" as const;
+  const start = workDayFor(date, workDays)?.startMinutes ?? 10 * 60;
+  return minutes > start ? ("LATE" as const) : ("PRESENT" as const);
+}
+
+export function minutesToInput(minutes: number) {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+export function inputToMinutes(value: string) {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+export function filledWorkDays(days: WorkDay[]) {
+  const defaults = defaultWorkDays();
+  return weekdayOrder.map((weekday) => days.find((day) => day.weekday === weekday) ?? defaults.find((day) => day.weekday === weekday)!);
+}

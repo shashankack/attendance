@@ -1,6 +1,7 @@
+import { holidayOn, isExpected } from "@/lib/schedule";
 import { cn } from "@/lib/utils";
-import { daysOfMonth, formatClock, isWeekend } from "@/lib/time";
-import type { Attendance } from "@/lib/types";
+import { daysOfMonth, formatClock } from "@/lib/time";
+import type { Attendance, Holiday, WorkDay } from "@/lib/types";
 
 const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -14,11 +15,15 @@ export function MonthCalendar({
   today,
   timeZone,
   records,
+  workDays,
+  holidays,
 }: {
   month: string;
   today: string;
   timeZone: string;
   records: Attendance[];
+  workDays: WorkDay[];
+  holidays: Holiday[];
 }) {
   const days = daysOfMonth(month);
   const byDate = new Map(records.map((record) => [record.date, record]));
@@ -36,9 +41,10 @@ export function MonthCalendar({
       ))}
       {days.map((date) => {
         const record = byDate.get(date);
-        const weekend = isWeekend(date);
+        const holiday = holidayOn(date, holidays);
+        const off = !isExpected(date, workDays, holidays);
         const future = date > today;
-        const label = weekend || future ? "" : record ? (record.status === "LATE" ? "L" : "P") : "–";
+        const label = future ? "" : record ? (record.status === "LATE" ? "L" : "P") : off ? "" : "–";
         const chip =
           label === "L" ? "bg-destructive/10 text-destructive" : label === "P" ? "bg-primary/15 text-primary" : "text-muted-foreground";
 
@@ -47,16 +53,17 @@ export function MonthCalendar({
             key={date}
             className={cn(
               "flex min-h-24 flex-col rounded-xl bg-card p-2 ring-1 ring-foreground/10",
-              weekend && "bg-muted/50",
+              off && "bg-muted/50",
               date === today && "ring-2 ring-primary",
             )}
           >
             <div className="flex items-start justify-between gap-1">
-              <span className={cn("text-sm font-medium", weekend && "text-muted-foreground")}>{Number(date.slice(8))}</span>
+              <span className={cn("text-sm font-medium", off && "text-muted-foreground")}>{Number(date.slice(8))}</span>
               {label ? (
                 <span className={cn("inline-flex size-6 items-center justify-center rounded-md text-[11px] font-medium", chip)}>{label}</span>
               ) : null}
             </div>
+            {holiday && !record ? <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">{holiday.name}</p> : null}
             {record ? (
               <p className="mt-auto pt-2 text-[11px] leading-4 text-muted-foreground">
                 {formatClock(record.checkInAt, timeZone)}

@@ -46,10 +46,10 @@ export default async function MyAttendancePage({
       </div>
       <div className="mt-10 flex flex-wrap items-center justify-between gap-3">
         <MonthNav month={month} hrefFor={(value) => `/me?month=${value}`} />
-        <p className="text-sm text-muted-foreground">P is on time, L is late, and a dash is a missed weekday.</p>
+        <p className="text-sm text-muted-foreground">P is on time, L is late, and a dash is a working day with no check-in. Days off and holidays are blank.</p>
       </div>
       <div className="mt-4">
-        <MonthCalendar month={month} today={today} timeZone={directory.office.timezone} records={records} />
+        <MonthCalendar month={month} today={today} timeZone={directory.office.timezone} records={records} workDays={directory.office.workDays} holidays={directory.office.holidays} />
       </div>
     </Shell>
   );

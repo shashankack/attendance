@@ -4,11 +4,10 @@ import { cache } from "react";
 import { neon, NeonDbError } from "@neondatabase/serverless";
 import { revalidateTag, unstable_cache } from "next/cache";
 
+import { arrivalStatus } from "./schedule";
 import { prepareDatabase } from "./schema.mjs";
 import { officeDate, officeMinutes } from "./time";
-import type { Attendance, AttendanceStatus, Employee, Office, Role, Team, User } from "./types";
-
-const START_MINUTES = 10 * 60;
+import type { Attendance, AttendanceStatus, Employee, Holiday, Office, Role, Team, User, WorkDay } from "./types";
 
 type UserRow = {
   id: string;
@@ -113,7 +112,7 @@ function mapTeam(row: TeamRow): Team {
   return { id: row.id, name: row.name };
 }
 
-function mapOffice(row: OfficeRow): Office {
+function mapOffice(row: OfficeRow): Omit<Office, "workDays" | "holidays"> {
   return {
     id: row.id,
     name: row.name,
@@ -166,17 +165,32 @@ function expire(tag: string) {
 async function queryDirectory() {
   await ensure();
   const sql = db();
-  const [teams, employees, offices] = await Promise.all([
+  const [teams, employees, offices, workDays, holidays] = await Promise.all([
     sql`SELECT id, name FROM teams ORDER BY name`,
     sql`SELECT id, code, first_name, last_name, email, team_id, office_id, active, pin_hash FROM employees ORDER BY first_name, last_name`,
     sql`SELECT id, name, latitude, longitude, allowed_radius_meters, timezone, public_ip, require_office_network FROM office LIMIT 1`,
+    sql`SELECT weekday, working, start_minutes, end_minutes FROM work_days ORDER BY weekday`,
+    sql`SELECT id, date, name FROM holidays ORDER BY date`,
   ]);
   const office = offices[0] as OfficeRow | undefined;
   if (!office) throw new Error("The office record is missing.");
   return {
     teams: (teams as TeamRow[]).map(mapTeam),
     employees: (employees as Array<Omit<EmployeeRow, "session_token">>).map((row) => mapEmployee({ ...row, session_token: null })),
-    office: mapOffice(office),
+    office: {
+      ...mapOffice(office),
+      workDays: (workDays as Array<{ weekday: number; working: boolean; start_minutes: number; end_minutes: number }>).map(
+        (row): WorkDay => ({
+          weekday: Number(row.weekday),
+          working: row.working,
+          startMinutes: Number(row.start_minutes),
+          endMinutes: Number(row.end_minutes),
+        }),
+      ),
+      holidays: (holidays as Array<{ id: string; date: string; name: string }>).map(
+        (row): Holiday => ({ id: row.id, date: row.date, name: row.name }),
+      ),
+    },
   };
 }
 
@@ -264,6 +278,31 @@ export async function getOffice() {
   return (await getDirectory()).office;
 }
 
+export async function saveSchedule(input: { workDays: WorkDay[]; holidays: Array<Pick<Holiday, "date" | "name">> }) {
+  await ensure();
+  const sql = db();
+  await sql.transaction([
+    ...input.workDays.map(
+      (day) => sql`
+        INSERT INTO work_days (weekday, working, start_minutes, end_minutes)
+        VALUES (${day.weekday}, ${day.working}, ${day.startMinutes}, ${day.endMinutes})
+        ON CONFLICT (weekday) DO UPDATE
+        SET working = EXCLUDED.working,
+            start_minutes = EXCLUDED.start_minutes,
+            end_minutes = EXCLUDED.end_minutes
+      `,
+    ),
+    sql`DELETE FROM holidays`,
+    ...input.holidays.map(
+      (holiday) => sql`
+        INSERT INTO holidays (id, date, name)
+        VALUES (${crypto.randomUUID()}, ${holiday.date}, ${holiday.name})
+      `,
+    ),
+  ]);
+  expire("directory");
+}
+
 export async function saveOffice(next: Pick<Office, "name" | "latitude" | "longitude" | "allowedRadiusMeters" | "publicIp" | "requireOfficeNetwork">) {
   await ensure();
   const sql = db();
@@ -289,7 +328,7 @@ export async function markCheckIn(input: { employeeId: string; distanceMeters: n
 
   const now = new Date();
   const date = officeDate(office.timezone, now);
-  const status: AttendanceStatus = officeMinutes(office.timezone, now) > START_MINUTES ? "LATE" : "PRESENT";
+  const status: AttendanceStatus = arrivalStatus(officeMinutes(office.timezone, now), date, office.workDays, office.holidays);
   const rows = (await sql`
     INSERT INTO attendance (
       id, employee_id, office_id, date, check_in_at, check_out_at,

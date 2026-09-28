@@ -20,11 +20,13 @@ import {
   renameTeam,
   replaceSession,
   saveOffice,
+  saveSchedule,
   sessionIsCurrent,
   updateEmployee,
   verifyPassword,
 } from "./store";
-import type { PublicUser } from "./types";
+import { filledWorkDays, weekdayNames } from "./schedule";
+import type { Holiday, PublicUser, WorkDay } from "./types";
 
 export type ActionResult = { ok: true } | { ok: false; message: string };
 
@@ -282,6 +284,45 @@ export async function updateOffice(input: {
     publicIp: input.publicIp.trim(),
     requireOfficeNetwork: input.requireOfficeNetwork,
   });
+  return { ok: true };
+}
+
+export async function updateSchedule(input: {
+  workDays: WorkDay[];
+  holidays: Array<Pick<Holiday, "date" | "name">>;
+}): Promise<ActionResult> {
+  if (!(await liveAdmin())) return { ok: false, message: "Only an admin can change the schedule." };
+
+  const workDays = filledWorkDays(input.workDays);
+  if (!workDays.some((day) => day.working)) {
+    return { ok: false, message: "Choose at least one working day." };
+  }
+  for (const day of workDays) {
+    if (
+      !Number.isInteger(day.startMinutes) ||
+      !Number.isInteger(day.endMinutes) ||
+      day.startMinutes < 0 ||
+      day.endMinutes < 0 ||
+      day.startMinutes > 1439 ||
+      day.endMinutes > 1439
+    ) {
+      return { ok: false, message: `Enter hours for ${weekdayNames[day.weekday]}.` };
+    }
+    if (day.working && day.endMinutes <= day.startMinutes) {
+      return { ok: false, message: `${weekdayNames[day.weekday]} must end after it starts.` };
+    }
+  }
+
+  const holidays = input.holidays.map((holiday) => ({ date: holiday.date.trim(), name: holiday.name.trim() }));
+  const seen = new Set<string>();
+  for (const holiday of holidays) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(holiday.date)) return { ok: false, message: "Enter a holiday date." };
+    if (!holiday.name || holiday.name.length > 80) return { ok: false, message: "A holiday needs a name of up to 80 characters." };
+    if (seen.has(holiday.date)) return { ok: false, message: "That date is already a holiday." };
+    seen.add(holiday.date);
+  }
+
+  await saveSchedule({ workDays, holidays });
   return { ok: true };
 }
 

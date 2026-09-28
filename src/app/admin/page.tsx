@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { OfficeEditor } from "@/components/office-editor";
+import { ScheduleEditor } from "@/components/schedule-editor";
 import { PageHeader } from "@/components/page-header";
 import { Shell } from "@/components/shell";
 import { StatusBadge } from "@/components/status-badge";
@@ -92,6 +93,9 @@ export default async function AdminPage() {
       </Card>
       <div className="mt-8">
         <OfficeEditor office={directory.office} />
+        <div className="mt-8">
+          <ScheduleEditor timeZone={directory.office.timezone} workDays={directory.office.workDays} holidays={directory.office.holidays} />
+        </div>
       </div>
     </Shell>
   );

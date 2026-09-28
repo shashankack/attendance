@@ -51,6 +51,29 @@ const statements = [
   `INSERT INTO office (id, name, latitude, longitude, allowed_radius_meters, timezone, public_ip, require_office_network)
    VALUES ('office', 'Office', 0, 0, 150, 'Asia/Kolkata', '', false)
    ON CONFLICT (id) DO NOTHING`,
+  `CREATE TABLE IF NOT EXISTS work_days (
+    weekday smallint PRIMARY KEY CHECK (weekday BETWEEN 0 AND 6),
+    working boolean NOT NULL,
+    start_minutes integer NOT NULL,
+    end_minutes integer NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS holidays (
+    id text PRIMARY KEY,
+    date text NOT NULL UNIQUE,
+    name text NOT NULL
+  )`,
+  `INSERT INTO work_days (weekday, working, start_minutes, end_minutes)
+   SELECT v.weekday, v.working, v.start_minutes, v.end_minutes
+   FROM (VALUES
+     (0, false, 600, 1080),
+     (1, true, 600, 1080),
+     (2, true, 600, 1080),
+     (3, true, 600, 1080),
+     (4, true, 600, 1080),
+     (5, true, 600, 1080),
+     (6, false, 600, 1080)
+   ) AS v(weekday, working, start_minutes, end_minutes)
+   WHERE NOT EXISTS (SELECT 1 FROM work_days)`,
 ];
 
 export async function prepareDatabase(query) {

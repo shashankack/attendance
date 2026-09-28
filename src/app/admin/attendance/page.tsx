@@ -10,7 +10,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils";
 import { currentUser } from "@/lib/actions";
 import { getDirectory, getMonthAttendance } from "@/lib/store";
-import { daysOfMonth, formatLongDay, isWeekend, officeDate, parseMonth } from "@/lib/time";
+import { isExpected } from "@/lib/schedule";
+import { daysOfMonth, formatLongDay, officeDate, parseMonth } from "@/lib/time";
 
 export default async function MonthlyAttendancePage({
   searchParams,
@@ -31,7 +32,7 @@ export default async function MonthlyAttendancePage({
   const rows = employees.map((employee) => {
     const records = attendance.filter((record) => record.employeeId === employee.id);
     const byDate = new Map(records.map((record) => [record.date, record]));
-    const absent = days.filter((date) => date <= today && !isWeekend(date) && !byDate.has(date)).length;
+    const absent = days.filter((date) => date <= today && isExpected(date, directory.office.workDays, directory.office.holidays) && !byDate.has(date)).length;
     return {
       employee,
       byDate,
@@ -43,7 +44,7 @@ export default async function MonthlyAttendancePage({
 
   return (
     <Shell name={user.name} role={user.role} day={formatLongDay(directory.office.timezone)} showTeams={directory.teams.length > 0}>
-      <PageHeader title="Month" description="P is on time, L is late, and a dash is a weekday with no check-in. Weekends are left blank." />
+      <PageHeader title="Month" description="P is on time, L is late, and a dash is a working day with no check-in. Days off and holidays are left blank." />
       <div className="mt-6">
         <MonthNav month={month} hrefFor={(value) => `/admin/attendance?month=${value}`} />
       </div>
@@ -86,7 +87,7 @@ export default async function MonthlyAttendancePage({
             <tr className="text-muted-foreground">
               <th className="sticky left-0 bg-card px-3 py-3 text-left font-medium">Employee</th>
               {days.map((date) => (
-                <th key={date} className={`px-1 py-3 font-medium ${isWeekend(date) ? "text-border" : ""}`}>
+                <th key={date} className={`px-1 py-3 font-medium ${isExpected(date, directory.office.workDays, directory.office.holidays) ? "" : "text-border"}`}>
                   {Number(date.slice(8))}
                 </th>
               ))}
@@ -100,8 +101,8 @@ export default async function MonthlyAttendancePage({
                 </th>
                 {days.map((date) => {
                   const record = row.byDate.get(date);
-                  const weekend = isWeekend(date);
-                  const label = weekend || date > today ? "" : record ? (record.status === "LATE" ? "L" : "P") : "–";
+                  const off = !isExpected(date, directory.office.workDays, directory.office.holidays);
+                  const label = date > today ? "" : record ? (record.status === "LATE" ? "L" : "P") : off ? "" : "–";
                   const chip =
                     label === "L"
                       ? "bg-destructive/10 text-destructive"

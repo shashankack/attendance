@@ -74,10 +74,10 @@ export default async function EmployeeDetailPage({
       </div>
       <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
         <MonthNav month={month} hrefFor={(value) => `/admin/employees/${id}?month=${value}`} />
-        <p className="text-sm text-muted-foreground">P is on time, L is late, and a dash is a missed weekday.</p>
+        <p className="text-sm text-muted-foreground">P is on time, L is late, and a dash is a working day with no check-in. Days off and holidays are blank.</p>
       </div>
       <div className="mt-4">
-        <MonthCalendar month={month} today={today} timeZone={office.timezone} records={records} />
+        <MonthCalendar month={month} today={today} timeZone={office.timezone} records={records} workDays={office.workDays} holidays={office.holidays} />
       </div>
       <div className="mt-8">
         <EmployeeEditor
