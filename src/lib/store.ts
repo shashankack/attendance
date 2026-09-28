@@ -2,12 +2,33 @@ import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import path from "path";
 
-import type { Attendance, AttendanceStatus, Database, Employee, Office, User } from "./types";
+import type { Attendance, AttendanceStatus, Database, Employee, Office, Team, User } from "./types";
 import { officeDate, officeMinutes } from "./time";
 
 const START_MINUTES = 10 * 60;
 const dataDir = path.join(process.cwd(), "data");
 const dataFile = path.join(dataDir, "db.json");
+
+type LegacyEmployee = {
+  id: string;
+  userId?: string;
+  code: string;
+  firstName: string;
+  lastName: string;
+  email?: string;
+  department?: string;
+  teamId?: string | null;
+  officeId: string;
+  active: boolean;
+};
+
+type LegacyFile = {
+  users: User[];
+  teams?: Team[];
+  employees: LegacyEmployee[];
+  office: Office;
+  attendance: Attendance[];
+};
 
 function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
@@ -47,106 +68,36 @@ function seed(): Database {
     requireOfficeNetwork: false,
   };
 
-  const people: Array<Omit<User, "passwordHash"> & Omit<Employee, "id" | "userId" | "officeId">> = [
-    {
-      id: crypto.randomUUID(),
-      email: "admin@baw.dev",
-      name: "Priya Shah",
-      role: "ADMIN",
-      code: "ADM-001",
-      firstName: "Priya",
-      lastName: "Shah",
-      department: "People",
-      active: true,
-    },
-    {
-      id: crypto.randomUUID(),
-      email: "arun@baw.dev",
-      name: "Arun Mehta",
-      role: "EMPLOYEE",
-      code: "EMP-014",
-      firstName: "Arun",
-      lastName: "Mehta",
-      department: "Engineering",
-      active: true,
-    },
-    {
-      id: crypto.randomUUID(),
-      email: "meera@baw.dev",
-      name: "Meera Iyer",
-      role: "EMPLOYEE",
-      code: "EMP-021",
-      firstName: "Meera",
-      lastName: "Iyer",
-      department: "Engineering",
-      active: true,
-    },
-    {
-      id: crypto.randomUUID(),
-      email: "kabir@baw.dev",
-      name: "Kabir Das",
-      role: "EMPLOYEE",
-      code: "EMP-033",
-      firstName: "Kabir",
-      lastName: "Das",
-      department: "Design",
-      active: true,
-    },
-    {
-      id: crypto.randomUUID(),
-      email: "sara@baw.dev",
-      name: "Sara Khan",
-      role: "EMPLOYEE",
-      code: "EMP-040",
-      firstName: "Sara",
-      lastName: "Khan",
-      department: "Product",
-      active: true,
-    },
-    {
-      id: crypto.randomUUID(),
-      email: "dev@baw.dev",
-      name: "Dev Patel",
-      role: "EMPLOYEE",
-      code: "EMP-018",
-      firstName: "Dev",
-      lastName: "Patel",
-      department: "Engineering",
-      active: true,
-    },
-    {
-      id: crypto.randomUUID(),
-      email: "neel@baw.dev",
-      name: "Neel Joshi",
-      role: "EMPLOYEE",
-      code: "EMP-052",
-      firstName: "Neel",
-      lastName: "Joshi",
-      department: "Sales",
-      active: true,
-    },
+  const teams: Team[] = [
+    { id: crypto.randomUUID(), name: "Engineering" },
+    { id: crypto.randomUUID(), name: "Design" },
+    { id: crypto.randomUUID(), name: "Product" },
+    { id: crypto.randomUUID(), name: "Sales" },
+  ];
+  const teamId = (name: string) => teams.find((team) => team.name === name)?.id ?? null;
+
+  const admin: User = {
+    id: crypto.randomUUID(),
+    email: "admin@baw.dev",
+    name: "Priya Shah",
+    role: "ADMIN",
+    passwordHash: hashPassword("password"),
+  };
+
+  const people: Array<Omit<Employee, "id" | "officeId">> = [
+    { code: "EMP-014", firstName: "Arun", lastName: "Mehta", email: "arun@baw.dev", teamId: teamId("Engineering"), active: true },
+    { code: "EMP-021", firstName: "Meera", lastName: "Iyer", email: "meera@baw.dev", teamId: teamId("Engineering"), active: true },
+    { code: "EMP-033", firstName: "Kabir", lastName: "Das", email: "kabir@baw.dev", teamId: teamId("Design"), active: true },
+    { code: "EMP-040", firstName: "Sara", lastName: "Khan", email: "sara@baw.dev", teamId: teamId("Product"), active: true },
+    { code: "EMP-018", firstName: "Dev", lastName: "Patel", email: "dev@baw.dev", teamId: teamId("Engineering"), active: true },
+    { code: "EMP-052", firstName: "Neel", lastName: "Joshi", email: "neel@baw.dev", teamId: null, active: true },
   ];
 
-  const users: User[] = people.map((person) => ({
-    id: person.id,
-    email: person.email,
-    name: person.name,
-    role: person.role,
-    passwordHash: hashPassword("password"),
+  const employees: Employee[] = people.map((person) => ({
+    ...person,
+    id: crypto.randomUUID(),
+    officeId: office.id,
   }));
-
-  const employees: Employee[] = people
-    .filter((person) => person.role === "EMPLOYEE")
-    .map((person) => ({
-      id: crypto.randomUUID(),
-      userId: person.id,
-      code: person.code,
-      firstName: person.firstName,
-      lastName: person.lastName,
-      department: person.department,
-      officeId: office.id,
-      active: true,
-    }));
 
   const byName = (name: string) => employees.find((employee) => employee.firstName === name)!;
   const today = officeDate(office.timezone);
@@ -188,12 +139,61 @@ function seed(): Database {
     add("Kabir", date, 9, 30, 17, 50);
   }
 
-  return { users, employees, office, attendance };
+  return { users: [admin], teams, employees, office, attendance };
+}
+
+function normalize(raw: LegacyFile): { db: Database; migrated: boolean } {
+  const teams: Team[] = Array.isArray(raw.teams) ? raw.teams.map((team) => ({ ...team })) : [];
+  const teamByName = new Map(teams.map((team) => [team.name.trim().toLowerCase(), team]));
+  let migrated = !Array.isArray(raw.teams);
+
+  const ensureTeam = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return null;
+    const existing = teamByName.get(trimmed.toLowerCase());
+    if (existing) return existing.id;
+    const team = { id: crypto.randomUUID(), name: trimmed };
+    teams.push(team);
+    teamByName.set(trimmed.toLowerCase(), team);
+    migrated = true;
+    return team.id;
+  };
+
+  const usersById = new Map(raw.users.map((user) => [user.id, user]));
+  const employees: Employee[] = raw.employees.map((employee) => {
+    const account = employee.userId ? usersById.get(employee.userId) : undefined;
+    if (employee.userId || employee.department !== undefined || employee.teamId === undefined || !employee.email) {
+      migrated = true;
+    }
+    const teamId =
+      employee.teamId !== undefined ? employee.teamId : ensureTeam(employee.department ?? "");
+    return {
+      id: employee.id,
+      code: employee.code,
+      firstName: employee.firstName,
+      lastName: employee.lastName,
+      email: (employee.email ?? account?.email ?? "").trim().toLowerCase(),
+      teamId,
+      officeId: employee.officeId,
+      active: employee.active,
+    };
+  });
+
+  const users = raw.users.filter((user) => user.role === "ADMIN");
+  if (users.length !== raw.users.length) migrated = true;
+
+  return {
+    migrated,
+    db: { users, teams, employees, office: raw.office, attendance: raw.attendance },
+  };
 }
 
 function read(): Database {
   try {
-    return JSON.parse(readFileSync(dataFile, "utf8")) as Database;
+    const parsed = JSON.parse(readFileSync(dataFile, "utf8")) as LegacyFile;
+    const { db, migrated } = normalize(parsed);
+    if (migrated) write(db);
+    return db;
   } catch {
     const seeded = seed();
     mkdirSync(dataDir, { recursive: true });
@@ -227,16 +227,17 @@ export function getDatabase() {
   return read();
 }
 
+export function teamName(teams: Team[], teamId: string | null) {
+  if (!teamId) return null;
+  return teams.find((team) => team.id === teamId)?.name ?? null;
+}
+
 export function findUserByEmail(email: string) {
   return read().users.find((user) => user.email.toLowerCase() === email.toLowerCase()) ?? null;
 }
 
 export function findUserById(id: string) {
   return read().users.find((user) => user.id === id) ?? null;
-}
-
-export function findEmployeeByUserId(userId: string) {
-  return read().employees.find((employee) => employee.userId === userId) ?? null;
 }
 
 export function getOffice() {
@@ -262,10 +263,7 @@ export async function saveOffice(next: Pick<Office, "name" | "latitude" | "longi
   });
 }
 
-export async function markCheckIn(input: {
-  employeeId: string;
-  distanceMeters: number;
-}) {
+export async function markCheckIn(input: { employeeId: string; distanceMeters: number }) {
   return update((db) => {
     const date = officeDate(db.office.timezone);
     const existing = db.attendance.find((record) => record.employeeId === input.employeeId && record.date === date);
@@ -286,6 +284,131 @@ export async function markCheckIn(input: {
     };
     db.attendance.push(record);
     return { ok: true as const, record };
+  });
+}
+
+export function findEmployeeById(id: string) {
+  return read().employees.find((employee) => employee.id === id) ?? null;
+}
+
+export function attendanceInMonth(employeeId: string, month: string) {
+  return read()
+    .attendance.filter((record) => record.employeeId === employeeId && record.date.startsWith(`${month}-`))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
+function teamExists(db: Database, teamId: string | null) {
+  return teamId == null || db.teams.some((team) => team.id === teamId);
+}
+
+export async function createEmployee(input: {
+  firstName: string;
+  lastName: string;
+  email: string;
+  code: string;
+  teamId: string | null;
+}) {
+  return update((db) => {
+    const email = input.email.trim().toLowerCase();
+    const code = input.code.trim().toUpperCase();
+    if (!teamExists(db, input.teamId)) return { ok: false as const, reason: "team" as const };
+    if (db.employees.some((employee) => employee.email.toLowerCase() === email)) {
+      return { ok: false as const, reason: "email" as const };
+    }
+    if (db.users.some((user) => user.email.toLowerCase() === email)) {
+      return { ok: false as const, reason: "email" as const };
+    }
+    if (db.employees.some((employee) => employee.code.toLowerCase() === code.toLowerCase())) {
+      return { ok: false as const, reason: "code" as const };
+    }
+
+    const employeeId = crypto.randomUUID();
+    db.employees.push({
+      id: employeeId,
+      code,
+      firstName: input.firstName.trim(),
+      lastName: input.lastName.trim(),
+      email,
+      teamId: input.teamId,
+      officeId: db.office.id,
+      active: true,
+    });
+    return { ok: true as const, employeeId };
+  });
+}
+
+export async function updateEmployee(input: {
+  employeeId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  code: string;
+  teamId: string | null;
+  active: boolean;
+}) {
+  return update((db) => {
+    const employee = db.employees.find((item) => item.id === input.employeeId);
+    if (!employee) return { ok: false as const, reason: "missing" as const };
+    if (!teamExists(db, input.teamId)) return { ok: false as const, reason: "team" as const };
+
+    const email = input.email.trim().toLowerCase();
+    const code = input.code.trim().toUpperCase();
+    if (db.employees.some((item) => item.id !== employee.id && item.email.toLowerCase() === email)) {
+      return { ok: false as const, reason: "email" as const };
+    }
+    if (db.users.some((user) => user.email.toLowerCase() === email)) {
+      return { ok: false as const, reason: "email" as const };
+    }
+    if (db.employees.some((item) => item.id !== employee.id && item.code.toLowerCase() === code.toLowerCase())) {
+      return { ok: false as const, reason: "code" as const };
+    }
+
+    employee.firstName = input.firstName.trim();
+    employee.lastName = input.lastName.trim();
+    employee.email = email;
+    employee.code = code;
+    employee.teamId = input.teamId;
+    employee.active = input.active;
+    return { ok: true as const };
+  });
+}
+
+export async function createTeam(name: string) {
+  return update((db) => {
+    const trimmed = name.trim();
+    if (!trimmed) return { ok: false as const, reason: "empty" as const };
+    if (db.teams.some((team) => team.name.toLowerCase() === trimmed.toLowerCase())) {
+      return { ok: false as const, reason: "name" as const };
+    }
+    const team = { id: crypto.randomUUID(), name: trimmed };
+    db.teams.push(team);
+    return { ok: true as const, team };
+  });
+}
+
+export async function renameTeam(id: string, name: string) {
+  return update((db) => {
+    const team = db.teams.find((item) => item.id === id);
+    if (!team) return { ok: false as const, reason: "missing" as const };
+    const trimmed = name.trim();
+    if (!trimmed) return { ok: false as const, reason: "empty" as const };
+    if (db.teams.some((item) => item.id !== id && item.name.toLowerCase() === trimmed.toLowerCase())) {
+      return { ok: false as const, reason: "name" as const };
+    }
+    team.name = trimmed;
+    return { ok: true as const };
+  });
+}
+
+export async function deleteTeam(id: string) {
+  return update((db) => {
+    const index = db.teams.findIndex((team) => team.id === id);
+    if (index < 0) return { ok: false as const, reason: "missing" as const };
+    db.teams.splice(index, 1);
+    for (const employee of db.employees) {
+      if (employee.teamId === id) employee.teamId = null;
+    }
+    return { ok: true as const };
   });
 }
 

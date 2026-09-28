@@ -6,13 +6,18 @@ import { redirect } from "next/navigation";
 import { distanceMeters } from "./geo";
 import { readSession, signSession } from "./session";
 import {
-  findEmployeeByUserId,
+  createEmployee,
+  createTeam,
+  deleteTeam,
+  findEmployeeById,
   findUserByEmail,
   findUserById,
   getOffice,
   markCheckIn,
   markCheckOut,
+  renameTeam,
   saveOffice,
+  updateEmployee,
   verifyPassword,
 } from "./store";
 import type { PublicUser } from "./types";
@@ -37,8 +42,8 @@ export async function login(formData: FormData): Promise<ActionResult> {
   const password = String(formData.get("password") ?? "");
   const user = findUserByEmail(email);
 
-  if (!user || !verifyPassword(password, user.passwordHash)) {
-    return { ok: false, message: "That email and password do not match." };
+  if (!user || user.role !== "ADMIN" || !verifyPassword(password, user.passwordHash)) {
+    return { ok: false, message: "That admin email and password do not match." };
   }
 
   const jar = await cookies();
@@ -49,7 +54,7 @@ export async function login(formData: FormData): Promise<ActionResult> {
     maxAge: 60 * 60 * 24 * 7,
   });
 
-  redirect(user.role === "ADMIN" ? "/admin" : "/me");
+  redirect("/admin");
 }
 
 export async function logout() {
@@ -58,12 +63,10 @@ export async function logout() {
   redirect("/");
 }
 
-async function requireEmployee() {
+async function requireAdmin() {
   const user = await currentUser();
-  if (!user || user.role !== "EMPLOYEE") redirect("/");
-  const employee = findEmployeeByUserId(user.id);
-  if (!employee) redirect("/");
-  return { user, employee };
+  if (!user || user.role !== "ADMIN") return null;
+  return user;
 }
 
 async function clientIp() {
@@ -77,11 +80,13 @@ function locationError(distance: number, radius: number) {
 }
 
 export async function checkIn(input: {
+  employeeId: string;
   latitude: number;
   longitude: number;
   accuracy: number;
 }): Promise<ActionResult> {
-  const { employee } = await requireEmployee();
+  const employee = findEmployeeById(input.employeeId);
+  if (!employee || !employee.active) return { ok: false, message: "That person is not on the desk." };
   const office = getOffice();
 
   if (!Number.isFinite(input.latitude) || !Number.isFinite(input.longitude)) {
@@ -113,11 +118,13 @@ export async function checkIn(input: {
 }
 
 export async function checkOut(input: {
+  employeeId: string;
   latitude: number;
   longitude: number;
   accuracy: number;
 }): Promise<ActionResult> {
-  const { employee } = await requireEmployee();
+  const employee = findEmployeeById(input.employeeId);
+  if (!employee || !employee.active) return { ok: false, message: "That person is not on the desk." };
   const office = getOffice();
   const distance = distanceMeters(input.latitude, input.longitude, office.latitude, office.longitude);
 
@@ -171,5 +178,81 @@ export async function updateOffice(input: {
     publicIp: input.publicIp.trim(),
     requireOfficeNetwork: input.requireOfficeNetwork,
   });
+  return { ok: true };
+}
+
+function employeeMessage(reason: "email" | "code" | "missing" | "team") {
+  if (reason === "email") return "That email is already in use.";
+  if (reason === "code") return "That employee code is already in use.";
+  if (reason === "team") return "Choose a team from the list, or leave the person without one.";
+  return "That employee no longer exists.";
+}
+
+export async function addEmployee(input: {
+  firstName: string;
+  lastName: string;
+  email: string;
+  code: string;
+  teamId: string | null;
+}): Promise<ActionResult & { employeeId?: string }> {
+  if (!(await requireAdmin())) return { ok: false, message: "Only an admin can add employees." };
+  if (!input.firstName.trim() || !input.lastName.trim() || !input.code.trim()) {
+    return { ok: false, message: "Name and employee code are required." };
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim())) {
+    return { ok: false, message: "Enter a valid email." };
+  }
+
+  const result = await createEmployee(input);
+  if (!result.ok) return { ok: false, message: employeeMessage(result.reason) };
+  return { ok: true, employeeId: result.employeeId };
+}
+
+export async function editEmployee(input: {
+  employeeId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  code: string;
+  teamId: string | null;
+  active: boolean;
+}): Promise<ActionResult> {
+  if (!(await requireAdmin())) return { ok: false, message: "Only an admin can edit employees." };
+  if (!input.firstName.trim() || !input.lastName.trim() || !input.code.trim()) {
+    return { ok: false, message: "Name and employee code are required." };
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim())) {
+    return { ok: false, message: "Enter a valid email." };
+  }
+
+  const result = await updateEmployee(input);
+  if (!result.ok) return { ok: false, message: employeeMessage(result.reason) };
+  return { ok: true };
+}
+
+function teamMessage(reason: "empty" | "name" | "missing") {
+  if (reason === "empty") return "A team needs a name.";
+  if (reason === "name") return "A team with that name already exists.";
+  return "That team no longer exists.";
+}
+
+export async function addTeam(name: string): Promise<ActionResult> {
+  if (!(await requireAdmin())) return { ok: false, message: "Only an admin can add teams." };
+  const result = await createTeam(name);
+  if (!result.ok) return { ok: false, message: teamMessage(result.reason) };
+  return { ok: true };
+}
+
+export async function editTeam(id: string, name: string): Promise<ActionResult> {
+  if (!(await requireAdmin())) return { ok: false, message: "Only an admin can rename teams." };
+  const result = await renameTeam(id, name);
+  if (!result.ok) return { ok: false, message: teamMessage(result.reason) };
+  return { ok: true };
+}
+
+export async function removeTeam(id: string): Promise<ActionResult> {
+  if (!(await requireAdmin())) return { ok: false, message: "Only an admin can delete teams." };
+  const result = await deleteTeam(id);
+  if (!result.ok) return { ok: false, message: teamMessage(result.reason) };
   return { ok: true };
 }

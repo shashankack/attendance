@@ -1,16 +1,17 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { OfficeEditor } from "@/components/office-editor";
 import { Shell } from "@/components/shell";
 import { currentUser } from "@/lib/actions";
-import { getDatabase } from "@/lib/store";
+import { getDatabase, teamName } from "@/lib/store";
 import { formatClock, formatLongDay, officeDate } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
   const user = await currentUser();
-  if (!user || user.role !== "ADMIN") redirect("/");
+  if (!user || user.role !== "ADMIN") redirect("/login");
 
   const db = getDatabase();
   const today = officeDate(db.office.timezone);
@@ -61,10 +62,12 @@ export default async function AdminPage() {
             {rows.map(({ employee, record }) => (
               <tr key={employee.id} className="border-t border-line">
                 <td className="px-4 py-3">
-                  {employee.firstName} {employee.lastName}
+                  <Link href={`/admin/employees/${employee.id}`} className="underline-offset-4 hover:underline">
+                    {employee.firstName} {employee.lastName}
+                  </Link>
                   <span className="ml-2 text-muted">{employee.code}</span>
                 </td>
-                <td className="px-4 py-3 text-muted">{employee.department}</td>
+                <td className="px-4 py-3 text-muted">{teamName(db.teams, employee.teamId) ?? "—"}</td>
                 <td className="px-4 py-3">{record ? formatClock(record.checkInAt, db.office.timezone) : "—"}</td>
                 <td className="px-4 py-3">{record?.checkOutAt ? formatClock(record.checkOutAt, db.office.timezone) : "—"}</td>
                 <td className="px-4 py-3">

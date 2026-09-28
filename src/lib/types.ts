@@ -8,13 +8,18 @@ export type User = {
   passwordHash: string;
 };
 
+export type Team = {
+  id: string;
+  name: string;
+};
+
 export type Employee = {
   id: string;
-  userId: string;
   code: string;
   firstName: string;
   lastName: string;
-  department: string;
+  email: string;
+  teamId: string | null;
   officeId: string;
   active: boolean;
 };
@@ -46,6 +51,7 @@ export type Attendance = {
 
 export type Database = {
   users: User[];
+  teams: Team[];
   employees: Employee[];
   office: Office;
   attendance: Attendance[];

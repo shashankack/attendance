@@ -46,6 +46,45 @@ export function formatLongDay(timeZone: string, instant = new Date()) {
   }).format(instant);
 }
 
+export function currentMonth(timeZone: string, instant = new Date()) {
+  return officeDate(timeZone, instant).slice(0, 7);
+}
+
+export function parseMonth(value: string | undefined, timeZone: string) {
+  if (value && /^\d{4}-\d{2}$/.test(value)) {
+    const month = Number(value.slice(5, 7));
+    if (month >= 1 && month <= 12) return value;
+  }
+  return currentMonth(timeZone);
+}
+
+export function shiftMonth(month: string, delta: number) {
+  const year = Number(month.slice(0, 4));
+  const mon = Number(month.slice(5, 7));
+  const date = new Date(year, mon - 1 + delta, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function daysOfMonth(month: string) {
+  const year = Number(month.slice(0, 4));
+  const mon = Number(month.slice(5, 7));
+  const count = new Date(year, mon, 0).getDate();
+  return Array.from({ length: count }, (_, index) => `${month}-${String(index + 1).padStart(2, "0")}`);
+}
+
+export function isWeekend(date: string) {
+  const day = new Date(`${date}T12:00:00+05:30`).getDay();
+  return day === 0 || day === 6;
+}
+
+export function formatMonth(month: string) {
+  return new Intl.DateTimeFormat("en-IN", {
+    month: "long",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  }).format(new Date(`${month}-01T12:00:00+05:30`));
+}
+
 export function greeting(timeZone: string, instant = new Date()) {
   const minutes = officeMinutes(timeZone, instant);
   if (minutes < 12 * 60) return "Good morning";

@@ -19,7 +19,7 @@ export function LoginForm() {
           type="email"
           autoComplete="username"
           required
-          defaultValue="arun@baw.dev"
+          defaultValue="admin@baw.dev"
           className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-3 outline-none focus:border-pine"
         />
       </label>

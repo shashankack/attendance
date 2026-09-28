@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { checkIn, checkOut } from "@/lib/actions";
 
 export function CheckInPanel({
+  employeeId,
+  firstName,
   checkedIn,
   checkedOut,
   checkInLabel,
@@ -14,6 +16,8 @@ export function CheckInPanel({
   officeName,
   radius,
 }: {
+  employeeId: string;
+  firstName: string;
   checkedIn: boolean;
   checkedOut: boolean;
   checkInLabel: string | null;
@@ -37,6 +41,7 @@ export function CheckInPanel({
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const payload = {
+          employeeId,
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
           accuracy: position.coords.accuracy,
@@ -58,7 +63,7 @@ export function CheckInPanel({
     );
   }
 
-  const headline = checkedOut ? "Day complete" : checkedIn ? "You are checked in" : "Not checked in";
+  const headline = checkedOut ? `${firstName} is done for the day` : checkedIn ? `${firstName} is checked in` : `${firstName} is not checked in`;
 
   return (
     <section className="rounded-3xl border border-line bg-card p-6 shadow-[0_20px_50px_rgba(28,25,22,0.05)] sm:p-8">
@@ -68,8 +73,8 @@ export function CheckInPanel({
         {checkedOut
           ? `In at ${checkInLabel}, out at ${checkOutLabel}.`
           : checkedIn
-            ? `Started at ${checkInLabel}. Check out before you leave the office.`
-            : `The server accepts a check-in inside ${radius} m of the office. Your browser only supplies coordinates.`}
+            ? `Started at ${checkInLabel}. Check out before leaving the office.`
+            : `Check-in is accepted inside ${radius} m of the office. The browser only supplies coordinates.`}
       </p>
       {status ? (
         <p className="mt-4 inline-flex rounded-full bg-paper px-3 py-1 text-sm">

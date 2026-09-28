@@ -7,25 +7,21 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const session = readSession(request.cookies.get("session")?.value);
 
-  if ((pathname.startsWith("/me") || pathname.startsWith("/admin")) && !session) {
+  if (pathname.startsWith("/me")) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
   if (pathname.startsWith("/admin") && session?.role !== "ADMIN") {
-    return NextResponse.redirect(new URL("/me", request.url));
+    return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  if (pathname.startsWith("/me") && session?.role === "ADMIN") {
+  if (pathname === "/login" && session?.role === "ADMIN") {
     return NextResponse.redirect(new URL("/admin", request.url));
-  }
-
-  if (pathname === "/" && session) {
-    return NextResponse.redirect(new URL(session.role === "ADMIN" ? "/admin" : "/me", request.url));
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/", "/me/:path*", "/admin/:path*"],
+  matcher: ["/me", "/me/:path*", "/login", "/admin", "/admin/:path*"],
 };
