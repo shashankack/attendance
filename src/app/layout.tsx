@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Fraunces, Outfit } from "next/font/google";
 
+import { cn } from "@/lib/utils";
+
 import "./globals.css";
 
 const outfit = Outfit({
@@ -20,7 +22,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${outfit.variable} ${fraunces.variable} h-full antialiased`}>
+    <html lang="en" className={cn("h-full antialiased", outfit.variable, fraunces.variable)}>
       <body className="min-h-full">{children}</body>
     </html>
   );

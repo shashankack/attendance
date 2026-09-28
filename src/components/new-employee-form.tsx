@@ -5,6 +5,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { addEmployee } from "@/lib/actions";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
 
 export function NewEmployeeForm({ teams }: { teams: Array<{ id: string; name: string }> }) {
   const router = useRouter();
@@ -32,50 +37,54 @@ export function NewEmployeeForm({ teams }: { teams: Array<{ id: string; name: st
     router.refresh();
   }
 
-  const field = "mt-1 w-full rounded-xl border border-line bg-white px-3 py-2";
-
   return (
-    <form onSubmit={submit} className="rounded-3xl border border-line bg-card p-6">
-      <h2 className="font-serif text-2xl">Add someone</h2>
-      <p className="mt-1 text-sm text-muted">
-        They mark attendance from the desk by tapping their name. A team is optional.{" "}
-        <Link href="/admin/teams" className="underline-offset-4 hover:underline">
-          Manage teams
-        </Link>
-      </p>
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <label className="text-sm">
-          First name
-          <input name="firstName" required className={field} />
-        </label>
-        <label className="text-sm">
-          Last name
-          <input name="lastName" required className={field} />
-        </label>
-        <label className="text-sm">
-          Email
-          <input name="email" type="email" required className={field} />
-        </label>
-        <label className="text-sm">
-          Code
-          <input name="code" required placeholder="EMP-060" className={field} />
-        </label>
-        <label className="text-sm sm:col-span-2">
-          Team
-          <select name="teamId" defaultValue="" className={field}>
-            <option value="">No team</option>
-            {teams.map((team) => (
-              <option key={team.id} value={team.id}>
-                {team.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {message ? <p className="mt-3 text-sm text-clay">{message}</p> : null}
-      <button type="submit" disabled={pending} className="mt-4 rounded-xl bg-ink px-4 py-2 text-paper disabled:opacity-60">
-        {pending ? "Adding…" : "Add employee"}
-      </button>
+    <form onSubmit={submit}>
+      <Card>
+        <CardHeader>
+          <CardTitle className="font-serif text-2xl">Add someone</CardTitle>
+          <CardDescription>
+            They mark attendance from the desk by tapping their name. A team is optional.{" "}
+            <Link href="/admin/teams" className="text-primary underline-offset-4 hover:underline">
+              Manage teams
+            </Link>
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-2">
+            <Label htmlFor="new-first">First name</Label>
+            <Input id="new-first" name="firstName" required className="bg-card" />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="new-last">Last name</Label>
+            <Input id="new-last" name="lastName" required className="bg-card" />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="new-email">Email</Label>
+            <Input id="new-email" name="email" type="email" required className="bg-card" />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="new-code">Code</Label>
+            <Input id="new-code" name="code" required placeholder="EMP-060" className="bg-card" />
+          </div>
+          <div className="grid gap-2 sm:col-span-2">
+            <Label htmlFor="new-team">Team</Label>
+            <NativeSelect id="new-team" name="teamId" defaultValue="">
+              <option value="">No team</option>
+              {teams.map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.name}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+          {message ? <p className="text-sm text-destructive sm:col-span-2">{message}</p> : null}
+        </CardContent>
+        <CardFooter>
+          <Button type="submit" disabled={pending}>
+            {pending ? "Adding…" : "Add employee"}
+          </Button>
+        </CardFooter>
+      </Card>
     </form>
   );
 }

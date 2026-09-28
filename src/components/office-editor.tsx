@@ -2,8 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { LocateFixed } from "lucide-react";
 
 import { updateOffice } from "@/lib/actions";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import type { Office } from "@/lib/types";
 
 export function OfficeEditor({ office }: { office: Office }) {
@@ -46,48 +52,51 @@ export function OfficeEditor({ office }: { office: Office }) {
   }
 
   return (
-    <form onSubmit={save} className="rounded-3xl border border-line bg-card p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="font-serif text-2xl">Office pin</h2>
-          <p className="mt-1 text-sm text-muted">
-            Employees can check in only inside this radius. Move the pin to where you are if you are demonstrating away from Bangalore.
-          </p>
-        </div>
-        <button type="button" onClick={useHere} className="shrink-0 rounded-full border border-line px-3 py-2 text-sm">
-          Use my location
-        </button>
-      </div>
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <label className="block text-sm">
-          Name
-          <input value={name} onChange={(event) => setName(event.target.value)} className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2" />
-        </label>
-        <label className="block text-sm">
-          Radius in meters
-          <input value={radius} onChange={(event) => setRadius(event.target.value)} inputMode="numeric" className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2" />
-        </label>
-        <label className="block text-sm">
-          Latitude
-          <input value={latitude} onChange={(event) => setLatitude(event.target.value)} className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2" />
-        </label>
-        <label className="block text-sm">
-          Longitude
-          <input value={longitude} onChange={(event) => setLongitude(event.target.value)} className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2" />
-        </label>
-        <label className="block text-sm sm:col-span-2">
-          Office public IP
-          <input value={publicIp} onChange={(event) => setPublicIp(event.target.value)} placeholder="Optional" className="mt-1 w-full rounded-xl border border-line bg-white px-3 py-2" />
-        </label>
-      </div>
-      <label className="mt-4 flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={requireNetwork} onChange={(event) => setRequireNetwork(event.target.checked)} />
-        Require the office public IP
-      </label>
-      {message ? <p className="mt-3 text-sm text-muted">{message}</p> : null}
-      <button type="submit" disabled={pending} className="mt-4 rounded-xl bg-ink px-4 py-2 text-paper disabled:opacity-60">
-        {pending ? "Saving…" : "Save office"}
-      </button>
+    <form onSubmit={save}>
+      <Card>
+        <CardHeader>
+          <CardTitle className="font-serif text-2xl">Office pin</CardTitle>
+          <CardDescription>
+            People can check in only inside this radius. Move the pin to where you are if you are demonstrating away from Bangalore.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-2">
+            <Label htmlFor="office-name">Name</Label>
+            <Input id="office-name" value={name} onChange={(event) => setName(event.target.value)} className="bg-card" />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="office-radius">Radius in meters</Label>
+            <Input id="office-radius" value={radius} onChange={(event) => setRadius(event.target.value)} inputMode="numeric" className="bg-card" />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="office-lat">Latitude</Label>
+            <Input id="office-lat" value={latitude} onChange={(event) => setLatitude(event.target.value)} className="bg-card" />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="office-lon">Longitude</Label>
+            <Input id="office-lon" value={longitude} onChange={(event) => setLongitude(event.target.value)} className="bg-card" />
+          </div>
+          <div className="grid gap-2 sm:col-span-2">
+            <Label htmlFor="office-ip">Office public IP</Label>
+            <Input id="office-ip" value={publicIp} onChange={(event) => setPublicIp(event.target.value)} placeholder="Optional" className="bg-card" />
+          </div>
+          <label className="flex items-center gap-2 text-sm sm:col-span-2">
+            <Checkbox checked={requireNetwork} onCheckedChange={(value) => setRequireNetwork(value === true)} />
+            Require the office public IP
+          </label>
+          {message ? <p className="text-sm text-muted-foreground sm:col-span-2">{message}</p> : null}
+        </CardContent>
+        <CardFooter className="justify-between gap-3">
+          <Button type="button" variant="outline" onClick={useHere}>
+            <LocateFixed />
+            Use my location
+          </Button>
+          <Button type="submit" disabled={pending}>
+            {pending ? "Saving…" : "Save office"}
+          </Button>
+        </CardFooter>
+      </Card>
     </form>
   );
 }

@@ -2,7 +2,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { OfficeEditor } from "@/components/office-editor";
+import { PageHeader } from "@/components/page-header";
 import { Shell } from "@/components/shell";
+import { StatusBadge } from "@/components/status-badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { currentUser } from "@/lib/actions";
 import { getDatabase, teamName } from "@/lib/store";
 import { formatClock, formatLongDay, officeDate } from "@/lib/time";
@@ -37,47 +41,54 @@ export default async function AdminPage() {
 
   return (
     <Shell name={user.name} role={user.role} day={formatLongDay(db.office.timezone)}>
-      <p className="text-muted">{db.office.name}</p>
-      <h1 className="mt-2 font-serif text-4xl tracking-tight">Who is here</h1>
+      <PageHeader eyebrow={db.office.name} title="Who is here" />
       <div className="mt-6 grid gap-3 sm:grid-cols-4">
         {stats.map((stat) => (
-          <div key={stat.label} className="rounded-2xl border border-line bg-card px-4 py-5">
-            <p className="text-sm text-muted">{stat.label}</p>
-            <p className="mt-2 font-serif text-4xl">{stat.value}</p>
-          </div>
+          <Card key={stat.label} size="sm">
+            <CardHeader>
+              <p className="text-sm text-muted-foreground">{stat.label}</p>
+              <CardTitle className="font-serif text-4xl">{stat.value}</CardTitle>
+            </CardHeader>
+          </Card>
         ))}
       </div>
-      <div className="mt-8 overflow-hidden rounded-3xl border border-line bg-card">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-paper text-muted">
-            <tr>
-              <th className="px-4 py-3 font-medium">Employee</th>
-              <th className="px-4 py-3 font-medium">Team</th>
-              <th className="px-4 py-3 font-medium">In</th>
-              <th className="px-4 py-3 font-medium">Out</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ employee, record }) => (
-              <tr key={employee.id} className="border-t border-line">
-                <td className="px-4 py-3">
-                  <Link href={`/admin/employees/${employee.id}`} className="underline-offset-4 hover:underline">
-                    {employee.firstName} {employee.lastName}
-                  </Link>
-                  <span className="ml-2 text-muted">{employee.code}</span>
-                </td>
-                <td className="px-4 py-3 text-muted">{teamName(db.teams, employee.teamId) ?? "—"}</td>
-                <td className="px-4 py-3">{record ? formatClock(record.checkInAt, db.office.timezone) : "—"}</td>
-                <td className="px-4 py-3">{record?.checkOutAt ? formatClock(record.checkOutAt, db.office.timezone) : "—"}</td>
-                <td className="px-4 py-3">
-                  {!record ? "Not in" : record.checkOutAt ? "Left" : record.status === "LATE" ? "Late" : "In"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <Card className="mt-8 py-0">
+        <CardContent className="px-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Employee</TableHead>
+                <TableHead>Team</TableHead>
+                <TableHead>In</TableHead>
+                <TableHead>Out</TableHead>
+                <TableHead>Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map(({ employee, record }) => {
+                const tone = !record ? "absent" : record.checkOutAt ? "left" : record.status === "LATE" ? "late" : "in";
+                const label = !record ? "Not in" : record.checkOutAt ? "Left" : record.status === "LATE" ? "Late" : "In";
+                return (
+                  <TableRow key={employee.id}>
+                    <TableCell>
+                      <Link href={`/admin/employees/${employee.id}`} className="font-medium underline-offset-4 hover:underline">
+                        {employee.firstName} {employee.lastName}
+                      </Link>
+                      <span className="ml-2 text-muted-foreground">{employee.code}</span>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{teamName(db.teams, employee.teamId) ?? "—"}</TableCell>
+                    <TableCell>{record ? formatClock(record.checkInAt, db.office.timezone) : "—"}</TableCell>
+                    <TableCell>{record?.checkOutAt ? formatClock(record.checkOutAt, db.office.timezone) : "—"}</TableCell>
+                    <TableCell>
+                      <StatusBadge tone={tone}>{label}</StatusBadge>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
       <div className="mt-8">
         <OfficeEditor office={db.office} />
       </div>

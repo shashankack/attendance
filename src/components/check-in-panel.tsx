@@ -2,8 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { MapPin } from "lucide-react";
 
 import { checkIn, checkOut } from "@/lib/actions";
+import { StatusBadge } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 
 export function CheckInPanel({
   employeeId,
@@ -66,44 +70,37 @@ export function CheckInPanel({
   const headline = checkedOut ? `${firstName} is done for the day` : checkedIn ? `${firstName} is checked in` : `${firstName} is not checked in`;
 
   return (
-    <section className="rounded-3xl border border-line bg-card p-6 shadow-[0_20px_50px_rgba(28,25,22,0.05)] sm:p-8">
-      <p className="text-sm uppercase tracking-[0.18em] text-muted">{officeName}</p>
-      <h2 className="mt-3 font-serif text-4xl tracking-tight sm:text-5xl">{headline}</h2>
-      <p className="mt-3 max-w-xl text-muted">
-        {checkedOut
-          ? `In at ${checkInLabel}, out at ${checkOutLabel}.`
-          : checkedIn
-            ? `Started at ${checkInLabel}. Check out before leaving the office.`
-            : `Check-in is accepted inside ${radius} m of the office. The browser only supplies coordinates.`}
-      </p>
-      {status ? (
-        <p className="mt-4 inline-flex rounded-full bg-paper px-3 py-1 text-sm">
-          {status === "LATE" ? "Late arrival" : "On time"}
+    <Card>
+      <CardHeader>
+        <CardDescription className="flex items-center gap-1.5 tracking-[0.14em] uppercase">
+          <MapPin className="size-3.5" />
+          {officeName}
+        </CardDescription>
+        <CardTitle className="font-serif text-4xl leading-tight tracking-tight">{headline}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-muted-foreground">
+          {checkedOut
+            ? `In at ${checkInLabel}, out at ${checkOutLabel}.`
+            : checkedIn
+              ? `Started at ${checkInLabel}. Check out before leaving the office.`
+              : `Check-in is accepted inside ${radius} m of the office. The browser only supplies coordinates.`}
         </p>
-      ) : null}
-      <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+        {status ? <StatusBadge tone={status === "LATE" ? "late" : "in"}>{status === "LATE" ? "Late arrival" : "On time"}</StatusBadge> : null}
+      </CardContent>
+      <CardFooter className="flex-col items-stretch gap-3">
         {!checkedIn ? (
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => locate("in")}
-            className="rounded-2xl bg-pine px-6 py-4 text-lg text-white transition hover:bg-pine-deep disabled:opacity-60"
-          >
+          <Button type="button" size="lg" disabled={pending} onClick={() => locate("in")} className="h-12 text-base">
             {pending ? "Checking location…" : "Check in"}
-          </button>
+          </Button>
         ) : null}
         {checkedIn && !checkedOut ? (
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => locate("out")}
-            className="rounded-2xl bg-ink px-6 py-4 text-lg text-paper transition hover:bg-pine-deep disabled:opacity-60"
-          >
+          <Button type="button" size="lg" variant="secondary" disabled={pending} onClick={() => locate("out")} className="h-12 text-base">
             {pending ? "Checking location…" : "Check out"}
-          </button>
+          </Button>
         ) : null}
-      </div>
-      {message ? <p className="mt-4 max-w-xl text-sm text-clay">{message}</p> : null}
-    </section>
+        {message ? <p className={pending ? "text-sm text-muted-foreground" : "text-sm text-destructive"}>{message}</p> : null}
+      </CardFooter>
+    </Card>
   );
 }

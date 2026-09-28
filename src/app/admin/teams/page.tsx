@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { PageHeader } from "@/components/page-header";
 import { Shell } from "@/components/shell";
 import { TeamManager } from "@/components/team-manager";
 import { currentUser } from "@/lib/actions";
@@ -23,10 +24,10 @@ export default async function TeamsPage() {
 
   return (
     <Shell name={user.name} role={user.role} day={formatLongDay(db.office.timezone)}>
-      <h1 className="font-serif text-4xl tracking-tight">Teams</h1>
-      <p className="mt-2 max-w-2xl text-muted">
-        Create, rename, or delete teams. A person can belong to one team, or to none. Deleting a team leaves its people unassigned.
-      </p>
+      <PageHeader
+        title="Teams"
+        description="Create, rename, or delete teams. A person can belong to one team, or to none. Deleting a team leaves its people unassigned."
+      />
       <div className="mt-8">
         <TeamManager teams={teams} />
       </div>

@@ -4,6 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { addTeam, editTeam, removeTeam } from "@/lib/actions";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 
 export function TeamManager({
   teams,
@@ -47,55 +52,51 @@ export function TeamManager({
     if (result.ok) router.refresh();
   }
 
-  const field = "w-full rounded-xl border border-line bg-white px-3 py-2";
-
   return (
     <div className="space-y-6">
-      <form onSubmit={create} className="rounded-3xl border border-line bg-card p-6">
-        <h2 className="font-serif text-2xl">New team</h2>
-        <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            required
-            placeholder="Finance"
-            className={field}
-          />
-          <button type="submit" disabled={pending} className="rounded-xl bg-ink px-4 py-2 text-paper disabled:opacity-60">
-            Add team
-          </button>
-        </div>
-      </form>
-      <ul className="divide-y divide-line overflow-hidden rounded-3xl border border-line bg-card">
-        {teams.length === 0 ? <li className="px-4 py-6 text-sm text-muted">No teams yet. People can still be added without one.</li> : null}
-        {teams.map((team) => (
-          <li key={team.id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center">
+      <Card>
+        <CardHeader>
+          <CardTitle className="font-serif text-2xl">New team</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={create} className="flex flex-col gap-3 sm:flex-row">
+            <Input value={name} onChange={(event) => setName(event.target.value)} required placeholder="Finance" className="bg-card" />
+            <Button type="submit" disabled={pending}>
+              Add team
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+      <Card className="gap-0 py-0">
+        {teams.length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">No teams yet. People can still be added without one.</p> : null}
+        {teams.map((team, index) => (
+          <div key={team.id}>
+            {index > 0 ? <Separator /> : null}
             <form
-              className="flex flex-1 flex-col gap-3 sm:flex-row"
+              className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center"
               onSubmit={(event) => {
                 event.preventDefault();
                 const nextName = String(new FormData(event.currentTarget).get("name") ?? "");
                 void rename(team.id, nextName);
               }}
             >
-              <input name="name" defaultValue={team.name} required className={field} />
-              <button type="submit" disabled={pending} className="rounded-xl border border-line px-4 py-2 disabled:opacity-60">
-                Save
-              </button>
+              <Input name="name" defaultValue={team.name} required className="bg-card sm:max-w-sm" />
+              <Badge variant="secondary" className="h-6 w-fit">
+                {team.count === 1 ? "1 person" : `${team.count} people`}
+              </Badge>
+              <div className="flex gap-2 sm:ml-auto">
+                <Button type="submit" variant="outline" disabled={pending}>
+                  Save
+                </Button>
+                <Button type="button" variant="ghost" disabled={pending} onClick={() => void remove(team.id, team.name, team.count)} className="text-destructive">
+                  Delete
+                </Button>
+              </div>
             </form>
-            <p className="text-sm text-muted sm:w-28">{team.count === 1 ? "1 person" : `${team.count} people`}</p>
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => void remove(team.id, team.name, team.count)}
-              className="text-sm text-clay disabled:opacity-60"
-            >
-              Delete
-            </button>
-          </li>
+          </div>
         ))}
-      </ul>
-      {message ? <p className="text-sm text-muted">{message}</p> : null}
+      </Card>
+      {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
     </div>
   );
 }

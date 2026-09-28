@@ -1,9 +1,15 @@
 "use client";
 
 import Link from "next/link";
+import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { CheckInPanel } from "@/components/check-in-panel";
+import { StatusBadge } from "@/components/status-badge";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 export type DeskPerson = {
   id: string;
@@ -18,6 +24,17 @@ export type DeskPerson = {
   checkOutLabel: string | null;
   status: "PRESENT" | "LATE" | null;
 };
+
+function initials(firstName: string, lastName: string) {
+  return `${firstName.slice(0, 1)}${lastName.slice(0, 1)}`.toUpperCase();
+}
+
+function presence(person: DeskPerson) {
+  if (!person.checkedIn) return { label: "Not in", tone: "absent" as const };
+  if (person.checkedOut) return { label: "Left", tone: "left" as const };
+  if (person.status === "LATE") return { label: "Late", tone: "late" as const };
+  return { label: "In", tone: "in" as const };
+}
 
 export function Desk({
   day,
@@ -58,52 +75,65 @@ export function Desk({
   const selected = people.find((person) => person.id === selectedId) ?? null;
 
   return (
-    <div className="min-h-screen bg-paper text-ink">
-      <header className="border-b border-line bg-card/80 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4">
-          <span className="font-serif text-xl tracking-tight">BAW</span>
-          <div className="flex items-center gap-4 text-sm">
-            <span className="hidden text-muted sm:inline">{day}</span>
-            <Link href={admin ? "/admin" : "/login"} className="text-muted underline-offset-4 hover:text-ink hover:underline">
-              {admin ? "Dashboard" : "Admin"}
-            </Link>
+    <div className="min-h-screen bg-background bg-[radial-gradient(ellipse_at_top,rgba(29,107,67,0.09),transparent_52%)] text-foreground">
+      <header className="sticky top-0 z-20 border-b bg-card/80 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3">
+          <span className="flex items-center gap-2 font-serif text-xl tracking-tight">
+            <span className="grid size-8 place-items-center rounded-lg bg-primary text-sm text-primary-foreground">B</span>
+            BAW
+          </span>
+          <div className="flex items-center gap-3 text-sm">
+            <span className="hidden text-muted-foreground sm:inline">{day}</span>
+            <Button variant="outline" size="sm" asChild>
+              <Link href={admin ? "/admin" : "/login"}>{admin ? "Dashboard" : "Admin"}</Link>
+            </Button>
           </div>
         </div>
       </header>
-      <main className="mx-auto grid max-w-6xl gap-8 px-5 py-8 lg:grid-cols-[1.1fr_0.9fr]">
+      <main className="mx-auto grid max-w-6xl gap-8 px-5 py-8 lg:grid-cols-[1.15fr_0.85fr]">
         <section>
           <h1 className="font-serif text-4xl tracking-tight">Mark attendance</h1>
-          <p className="mt-2 max-w-xl text-muted">Tap your name. The office checks your location. No password.</p>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search by name or code"
-            className="mt-5 w-full rounded-2xl border border-line bg-white px-4 py-3 outline-none focus:border-pine"
-          />
+          <p className="mt-2 max-w-xl text-muted-foreground">Tap your name. The office checks your location. No password.</p>
+          <div className="relative mt-5">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search by name or code"
+              className="h-10 bg-card pl-9"
+            />
+          </div>
           <div className="mt-6 space-y-6">
-            {groups.length === 0 ? <p className="text-sm text-muted">No one matches that search.</p> : null}
+            {groups.length === 0 ? <p className="text-sm text-muted-foreground">No one matches that search.</p> : null}
             {groups.map((group) => (
               <div key={group.name}>
-                <h2 className="text-sm uppercase tracking-[0.16em] text-muted">{group.name}</h2>
+                <h2 className="text-xs font-medium tracking-[0.16em] text-muted-foreground uppercase">{group.name}</h2>
                 <ul className="mt-2 grid gap-2 sm:grid-cols-2">
                   {group.people.map((person) => {
-                    const label = !person.checkedIn ? "Not in" : person.checkedOut ? "Left" : person.status === "LATE" ? "Late" : "In";
-                    const tone = label === "Late" ? "text-clay" : label === "In" ? "text-pine" : "text-muted";
+                    const state = presence(person);
                     const selectedCard = person.id === selectedId;
                     return (
                       <li key={person.id}>
                         <button
                           type="button"
                           onClick={() => setSelectedId(person.id)}
-                          className={`w-full rounded-2xl border px-4 py-3 text-left ${selectedCard ? "border-ink bg-card" : "border-line bg-card hover:border-ink"}`}
+                          className={cn(
+                            "flex w-full items-center gap-3 rounded-xl bg-card px-3 py-3 text-left ring-1 ring-foreground/10 transition-shadow hover:ring-primary/40",
+                            selectedCard && "ring-2 ring-primary",
+                          )}
                         >
-                          <span className="block font-medium">
-                            {person.firstName} {person.lastName}
+                          <Avatar>
+                            <AvatarFallback className="bg-primary/10 font-medium text-primary">
+                              {initials(person.firstName, person.lastName)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-medium">
+                              {person.firstName} {person.lastName}
+                            </span>
+                            <span className="text-xs text-muted-foreground">{person.code}</span>
                           </span>
-                          <span className="mt-1 flex items-center justify-between text-sm">
-                            <span className="text-muted">{person.code}</span>
-                            <span className={tone}>{label}</span>
-                          </span>
+                          <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
                         </button>
                       </li>
                     );
@@ -113,7 +143,7 @@ export function Desk({
             ))}
           </div>
         </section>
-        <section>
+        <section className="lg:sticky lg:top-24 lg:self-start">
           {selected ? (
             <CheckInPanel
               employeeId={selected.id}
@@ -127,7 +157,7 @@ export function Desk({
               radius={radius}
             />
           ) : (
-            <div className="rounded-3xl border border-dashed border-line bg-card p-8 text-muted">
+            <div className="rounded-xl border border-dashed bg-card p-8 text-muted-foreground ring-1 ring-foreground/10">
               Choose yourself to check in or out.
             </div>
           )}
