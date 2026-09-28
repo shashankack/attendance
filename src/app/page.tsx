@@ -1,41 +1,33 @@
 import { Desk } from "@/components/desk";
-import { currentUser } from "@/lib/actions";
-import { getDatabase, teamName } from "@/lib/store";
-import { formatClock, formatLongDay, officeDate } from "@/lib/time";
-
-export const dynamic = "force-dynamic";
+import { currentEmployee, currentUser } from "@/lib/actions";
+import { getDirectory, getMonthAttendance, teamName } from "@/lib/store";
+import { formatLongDay, officeDate } from "@/lib/time";
 
 export default async function HomePage() {
   const user = await currentUser();
-  const db = getDatabase();
-  const today = officeDate(db.office.timezone);
-  const people = db.employees
+  const signedIn = await currentEmployee();
+  const directory = await getDirectory();
+  const today = officeDate(directory.office.timezone);
+  const attendance = await getMonthAttendance(today.slice(0, 7));
+  const showTeams = directory.teams.length > 0;
+  const people = directory.employees
     .filter((employee) => employee.active)
     .sort((a, b) => a.firstName.localeCompare(b.firstName))
     .map((employee) => {
-      const record = db.attendance.find((item) => item.employeeId === employee.id && item.date === today) ?? null;
+      const record = attendance.find((item) => item.employeeId === employee.id && item.date === today) ?? null;
       return {
         id: employee.id,
         firstName: employee.firstName,
         lastName: employee.lastName,
         code: employee.code,
-        teamId: employee.teamId,
-        teamName: teamName(db.teams, employee.teamId),
+        teamName: showTeams ? teamName(directory.teams, employee.teamId) : null,
         checkedIn: Boolean(record),
         checkedOut: Boolean(record?.checkOutAt),
-        checkInLabel: record ? formatClock(record.checkInAt, db.office.timezone) : null,
-        checkOutLabel: record?.checkOutAt ? formatClock(record.checkOutAt, db.office.timezone) : null,
         status: record?.status ?? null,
       };
     });
 
-  return (
-    <Desk
-      day={formatLongDay(db.office.timezone)}
-      officeName={db.office.name}
-      radius={db.office.allowedRadiusMeters}
-      admin={user?.role === "ADMIN"}
-      people={people}
-    />
-  );
+  const viewer = user?.role === "ADMIN" ? "admin" : signedIn ? "employee" : "guest";
+
+  return <Desk day={formatLongDay(directory.office.timezone)} showTeams={showTeams} viewer={viewer} people={people} />;
 }

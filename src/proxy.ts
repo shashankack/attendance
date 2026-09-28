@@ -7,7 +7,7 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const session = readSession(request.cookies.get("session")?.value);
 
-  if (pathname.startsWith("/me")) {
+  if (pathname.startsWith("/me") && session?.role !== "EMPLOYEE") {
     return NextResponse.redirect(new URL("/", request.url));
   }
 
@@ -23,5 +23,5 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/me", "/me/:path*", "/login", "/admin", "/admin/:path*"],
+  matcher: ["/", "/me", "/me/:path*", "/e/:path*", "/login", "/admin", "/admin/:path*"],
 };

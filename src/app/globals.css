@@ -5,9 +5,9 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-sans: var(--font-outfit);
-  --font-serif: var(--font-fraunces);
-  --font-heading: var(--font-fraunces);
+  --font-sans: var(--font-playpen);
+  --font-serif: var(--font-playpen);
+  --font-heading: var(--font-playpen);
   --color-pine: #1d6b43;
   --color-pine-deep: #123c26;
   --color-clay: #b5522a;

@@ -6,6 +6,7 @@ export type User = {
   name: string;
   role: Role;
   passwordHash: string;
+  sessionToken: string | null;
 };
 
 export type Team = {
@@ -22,6 +23,8 @@ export type Employee = {
   teamId: string | null;
   officeId: string;
   active: boolean;
+  pinHash: string | null;
+  sessionToken: string | null;
 };
 
 export type Office = {

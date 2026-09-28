@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LocateFixed } from "lucide-react";
+import { LocateFixed, Wifi } from "lucide-react";
 
-import { updateOffice } from "@/lib/actions";
+import { officeWifi, updateOffice } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,6 +22,40 @@ export function OfficeEditor({ office }: { office: Office }) {
   const [requireNetwork, setRequireNetwork] = useState(office.requireOfficeNetwork);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [readingWifi, setReadingWifi] = useState(false);
+  const [committed, setCommitted] = useState({
+    name: office.name,
+    latitude: String(office.latitude),
+    longitude: String(office.longitude),
+    radius: String(office.allowedRadiusMeters),
+    publicIp: office.publicIp,
+    requireNetwork: office.requireOfficeNetwork,
+  });
+  const dirty =
+    name !== committed.name ||
+    latitude !== committed.latitude ||
+    longitude !== committed.longitude ||
+    radius !== committed.radius ||
+    publicIp !== committed.publicIp ||
+    requireNetwork !== committed.requireNetwork;
+
+  useEffect(() => {
+    const next = {
+      name: office.name,
+      latitude: String(office.latitude),
+      longitude: String(office.longitude),
+      radius: String(office.allowedRadiusMeters),
+      publicIp: office.publicIp,
+      requireNetwork: office.requireOfficeNetwork,
+    };
+    setName(next.name);
+    setLatitude(next.latitude);
+    setLongitude(next.longitude);
+    setRadius(next.radius);
+    setPublicIp(next.publicIp);
+    setRequireNetwork(next.requireNetwork);
+    setCommitted(next);
+  }, [office.name, office.latitude, office.longitude, office.allowedRadiusMeters, office.publicIp, office.requireOfficeNetwork]);
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
@@ -36,7 +70,45 @@ export function OfficeEditor({ office }: { office: Office }) {
     });
     setPending(false);
     setMessage(result.ok ? "Office saved." : result.message);
-    if (result.ok) router.refresh();
+    if (result.ok) {
+      setCommitted({ name, latitude, longitude, radius, publicIp, requireNetwork });
+      router.refresh();
+    }
+  }
+
+  async function useWifi() {
+    setReadingWifi(true);
+    const result = await officeWifi();
+    if (!result.ok) {
+      setReadingWifi(false);
+      setMessage(result.message);
+      return;
+    }
+
+    let ip = result.ip;
+    if (!ip) {
+      try {
+        const response = await fetch("https://api.ipify.org?format=json");
+        const body = (await response.json()) as { ip?: string };
+        ip = body.ip?.trim() ?? "";
+      } catch {
+        ip = "";
+      }
+    }
+
+    setReadingWifi(false);
+    if (!ip) {
+      setMessage("Join the office Wi-Fi, then try again. The address could not be read.");
+      return;
+    }
+
+    setPublicIp(ip);
+    if (result.seenByServer) setRequireNetwork(true);
+    setMessage(
+      result.seenByServer
+        ? "This Wi-Fi is filled in. Save to require it for attendance."
+        : "This Wi-Fi’s internet address is filled in. Save it. Require it once people open the site from that Wi-Fi.",
+    );
   }
 
   function useHere() {
@@ -78,12 +150,27 @@ export function OfficeEditor({ office }: { office: Office }) {
             <Input id="office-lon" value={longitude} onChange={(event) => setLongitude(event.target.value)} className="bg-card" />
           </div>
           <div className="grid gap-2 sm:col-span-2">
-            <Label htmlFor="office-ip">Office public IP</Label>
-            <Input id="office-ip" value={publicIp} onChange={(event) => setPublicIp(event.target.value)} placeholder="Optional" className="bg-card" />
+            <Label htmlFor="office-ip">Office Wi-Fi</Label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                id="office-ip"
+                value={publicIp}
+                onChange={(event) => setPublicIp(event.target.value)}
+                placeholder="Filled in when you use this Wi-Fi"
+                className="bg-card"
+              />
+              <Button type="button" variant="outline" disabled={readingWifi} onClick={() => void useWifi()}>
+                <Wifi />
+                {readingWifi ? "Reading Wi-Fi…" : "Use this Wi-Fi"}
+              </Button>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Join the office Wi-Fi on this phone or computer, then press Use this Wi-Fi. The address is filled in for you.
+            </p>
           </div>
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
             <Checkbox checked={requireNetwork} onCheckedChange={(value) => setRequireNetwork(value === true)} />
-            Require the office public IP
+            Only allow attendance on this Wi-Fi
           </label>
           {message ? <p className="text-sm text-muted-foreground sm:col-span-2">{message}</p> : null}
         </CardContent>
@@ -92,7 +179,7 @@ export function OfficeEditor({ office }: { office: Office }) {
             <LocateFixed />
             Use my location
           </Button>
-          <Button type="submit" disabled={pending}>
+          <Button type="submit" disabled={!dirty || pending}>
             {pending ? "Saving…" : "Save office"}
           </Button>
         </CardFooter>

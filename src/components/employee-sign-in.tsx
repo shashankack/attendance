@@ -2,31 +2,33 @@
 
 import { useActionState } from "react";
 
-import { login, type ActionResult } from "@/lib/actions";
+import { signInEmployee, type ActionResult } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export function LoginForm() {
+export function EmployeeSignIn({ employeeId }: { employeeId: string }) {
   const [state, action, pending] = useActionState(
-    async (_previous: ActionResult | null, formData: FormData) => login(formData),
+    async (_previous: ActionResult | null, formData: FormData) =>
+      signInEmployee(String(formData.get("employeeId") ?? ""), String(formData.get("pin") ?? "")),
     null,
   );
 
   return (
     <form action={action} className="space-y-4">
+      <input type="hidden" name="employeeId" value={employeeId} />
       <div className="grid gap-2">
-        <Label htmlFor="email">Email</Label>
-        <Input id="email" name="email" type="email" autoComplete="username" required className="h-10 bg-card" />
-      </div>
-      <div className="grid gap-2">
-        <Label htmlFor="password">Password</Label>
+        <Label htmlFor="pin">PIN</Label>
         <Input
-          id="password"
-          name="password"
+          id="pin"
+          name="pin"
           type="password"
-          autoComplete="current-password"
+          inputMode="numeric"
+          autoComplete="off"
           required
+          minLength={4}
+          maxLength={8}
+          pattern="[0-9]{4,8}"
           className="h-10 bg-card"
         />
       </div>

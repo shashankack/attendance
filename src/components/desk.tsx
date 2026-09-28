@@ -4,24 +4,22 @@ import Link from "next/link";
 import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { CheckInPanel } from "@/components/check-in-panel";
+import { Logo } from "@/components/logo";
+import { SessionWatch } from "@/components/session-watch";
 import { StatusBadge } from "@/components/status-badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { logout } from "@/lib/actions";
 
 export type DeskPerson = {
   id: string;
   firstName: string;
   lastName: string;
   code: string;
-  teamId: string | null;
   teamName: string | null;
   checkedIn: boolean;
   checkedOut: boolean;
-  checkInLabel: string | null;
-  checkOutLabel: string | null;
   status: "PRESENT" | "LATE" | null;
 };
 
@@ -38,19 +36,16 @@ function presence(person: DeskPerson) {
 
 export function Desk({
   day,
-  officeName,
-  radius,
-  admin,
+  showTeams,
+  viewer,
   people,
 }: {
   day: string;
-  officeName: string;
-  radius: number;
-  admin: boolean;
+  showTeams: boolean;
+  viewer: "admin" | "employee" | "guest";
   people: DeskPerson[];
 }) {
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -62,6 +57,7 @@ export function Desk({
   }, [people, query]);
 
   const groups = useMemo(() => {
+    if (!showTeams) return [{ name: "", people: visible }];
     const names = [...new Set(visible.map((person) => person.teamName).filter((name): name is string => Boolean(name)))].sort();
     const sections = names.map((name) => ({
       name,
@@ -70,98 +66,97 @@ export function Desk({
     const unassigned = visible.filter((person) => !person.teamName);
     if (unassigned.length) sections.push({ name: "No team", people: unassigned });
     return sections;
-  }, [visible]);
-
-  const selected = people.find((person) => person.id === selectedId) ?? null;
+  }, [showTeams, visible]);
 
   return (
     <div className="min-h-screen bg-background bg-[radial-gradient(ellipse_at_top,rgba(29,107,67,0.09),transparent_52%)] text-foreground">
+      {viewer === "guest" ? null : <SessionWatch href={viewer === "admin" ? "/login" : "/"} />}
       <header className="sticky top-0 z-20 border-b bg-card/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-3">
-          <span className="flex items-center gap-2 font-serif text-xl tracking-tight">
-            <span className="grid size-8 place-items-center rounded-lg bg-primary text-sm text-primary-foreground">B</span>
-            BAW
+          <span className="flex items-center">
+            <Logo />
           </span>
           <div className="flex items-center gap-3 text-sm">
             <span className="hidden text-muted-foreground sm:inline">{day}</span>
-            <Button variant="outline" size="sm" asChild>
-              <Link href={admin ? "/admin" : "/login"}>{admin ? "Dashboard" : "Admin"}</Link>
-            </Button>
+            {viewer === "admin" ? (
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/admin">Dashboard</Link>
+              </Button>
+            ) : null}
+            {viewer === "employee" ? (
+              <>
+                <Button size="sm" asChild>
+                  <Link href="/me">Mark attendance</Link>
+                </Button>
+                <form action={logout}>
+                  <Button type="submit" variant="ghost" size="sm">
+                    Log off
+                  </Button>
+                </form>
+              </>
+            ) : null}
+            {viewer === "guest" ? (
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/login">Admin</Link>
+              </Button>
+            ) : null}
           </div>
         </div>
       </header>
-      <main className="mx-auto grid max-w-6xl gap-8 px-5 py-8 lg:grid-cols-[1.15fr_0.85fr]">
-        <section>
-          <h1 className="font-serif text-4xl tracking-tight">Mark attendance</h1>
-          <p className="mt-2 max-w-xl text-muted-foreground">Tap your name. The office checks your location. No password.</p>
-          <div className="relative mt-5">
-            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search by name or code"
-              className="h-10 bg-card pl-9"
-            />
-          </div>
-          <div className="mt-6 space-y-6">
-            {groups.length === 0 ? <p className="text-sm text-muted-foreground">No one matches that search.</p> : null}
-            {groups.map((group) => (
-              <div key={group.name}>
+      <main className="mx-auto max-w-6xl px-5 py-8">
+        <h1 className="font-serif text-4xl tracking-tight">Attendance</h1>
+        <p className="mt-2 max-w-xl text-muted-foreground">
+          Choose your name and sign in with your PIN. Mark arrival and leaving time on your own page.
+        </p>
+        <div className="relative mt-5 max-w-md">
+          <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search by name or code"
+            className="h-10 bg-card pl-9"
+          />
+        </div>
+        <div className="mt-6 space-y-6">
+          {people.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No one has been added yet.</p>
+          ) : groups.length === 0 || groups.every((group) => group.people.length === 0) ? (
+            <p className="text-sm text-muted-foreground">No one matches that search.</p>
+          ) : null}
+          {groups.map((group) => (
+            <div key={group.name || "everyone"}>
+              {group.name ? (
                 <h2 className="text-xs font-medium tracking-[0.16em] text-muted-foreground uppercase">{group.name}</h2>
-                <ul className="mt-2 grid gap-2 sm:grid-cols-2">
-                  {group.people.map((person) => {
-                    const state = presence(person);
-                    const selectedCard = person.id === selectedId;
-                    return (
-                      <li key={person.id}>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedId(person.id)}
-                          className={cn(
-                            "flex w-full items-center gap-3 rounded-xl bg-card px-3 py-3 text-left ring-1 ring-foreground/10 transition-shadow hover:ring-primary/40",
-                            selectedCard && "ring-2 ring-primary",
-                          )}
-                        >
-                          <Avatar>
-                            <AvatarFallback className="bg-primary/10 font-medium text-primary">
-                              {initials(person.firstName, person.lastName)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate font-medium">
-                              {person.firstName} {person.lastName}
-                            </span>
-                            <span className="text-xs text-muted-foreground">{person.code}</span>
+              ) : null}
+              <ul className={`grid gap-2 sm:grid-cols-2 lg:grid-cols-3 ${group.name ? "mt-2" : ""}`}>
+                {group.people.map((person) => {
+                  const state = presence(person);
+                  return (
+                    <li key={person.id}>
+                      <Link
+                        href={`/e/${person.id}`}
+                        className="flex w-full items-center gap-3 rounded-xl bg-card px-3 py-3 text-left ring-1 ring-foreground/10 transition-shadow hover:ring-primary/40"
+                      >
+                        <Avatar>
+                          <AvatarFallback className="bg-primary/10 font-medium text-primary">
+                            {initials(person.firstName, person.lastName)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium">
+                            {person.firstName} {person.lastName}
                           </span>
-                          <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </section>
-        <section className="lg:sticky lg:top-24 lg:self-start">
-          {selected ? (
-            <CheckInPanel
-              employeeId={selected.id}
-              firstName={selected.firstName}
-              checkedIn={selected.checkedIn}
-              checkedOut={selected.checkedOut}
-              checkInLabel={selected.checkInLabel}
-              checkOutLabel={selected.checkOutLabel}
-              status={selected.status}
-              officeName={officeName}
-              radius={radius}
-            />
-          ) : (
-            <div className="rounded-xl border border-dashed bg-card p-8 text-muted-foreground ring-1 ring-foreground/10">
-              Choose yourself to check in or out.
+                          <span className="text-xs text-muted-foreground">{person.code}</span>
+                        </span>
+                        <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
-          )}
-        </section>
+          ))}
+        </div>
       </main>
     </div>
   );

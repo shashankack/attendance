@@ -9,10 +9,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { currentUser } from "@/lib/actions";
-import { getDatabase } from "@/lib/store";
+import { getDirectory, getMonthAttendance } from "@/lib/store";
 import { daysOfMonth, formatLongDay, isWeekend, officeDate, parseMonth } from "@/lib/time";
-
-export const dynamic = "force-dynamic";
 
 export default async function MonthlyAttendancePage({
   searchParams,
@@ -22,15 +20,16 @@ export default async function MonthlyAttendancePage({
   const user = await currentUser();
   if (!user || user.role !== "ADMIN") redirect("/login");
 
-  const db = getDatabase();
+  const directory = await getDirectory();
   const query = await searchParams;
-  const month = parseMonth(query.month, db.office.timezone);
-  const today = officeDate(db.office.timezone);
+  const month = parseMonth(query.month, directory.office.timezone);
+  const today = officeDate(directory.office.timezone);
   const days = daysOfMonth(month);
-  const employees = [...db.employees].sort((a, b) => a.firstName.localeCompare(b.firstName));
+  const attendance = await getMonthAttendance(month);
+  const employees = [...directory.employees].sort((a, b) => a.firstName.localeCompare(b.firstName));
 
   const rows = employees.map((employee) => {
-    const records = db.attendance.filter((record) => record.employeeId === employee.id && record.date.startsWith(`${month}-`));
+    const records = attendance.filter((record) => record.employeeId === employee.id);
     const byDate = new Map(records.map((record) => [record.date, record]));
     const absent = days.filter((date) => date <= today && !isWeekend(date) && !byDate.has(date)).length;
     return {
@@ -43,7 +42,7 @@ export default async function MonthlyAttendancePage({
   });
 
   return (
-    <Shell name={user.name} role={user.role} day={formatLongDay(db.office.timezone)}>
+    <Shell name={user.name} role={user.role} day={formatLongDay(directory.office.timezone)} showTeams={directory.teams.length > 0}>
       <PageHeader title="Month" description="P is on time, L is late, and a dash is a weekday with no check-in. Weekends are left blank." />
       <div className="mt-6">
         <MonthNav month={month} hrefFor={(value) => `/admin/attendance?month=${value}`} />

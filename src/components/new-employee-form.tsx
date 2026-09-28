@@ -26,7 +26,8 @@ export function NewEmployeeForm({ teams }: { teams: Array<{ id: string; name: st
       lastName: String(form.get("lastName") ?? ""),
       email: String(form.get("email") ?? ""),
       code: String(form.get("code") ?? ""),
-      teamId: teamId || null,
+      teamId: teams.length > 0 ? teamId || null : null,
+      pin: String(form.get("pin") ?? ""),
     });
     setPending(false);
     if (!result.ok) {
@@ -43,10 +44,16 @@ export function NewEmployeeForm({ teams }: { teams: Array<{ id: string; name: st
         <CardHeader>
           <CardTitle className="font-serif text-2xl">Add someone</CardTitle>
           <CardDescription>
-            They mark attendance from the desk by tapping their name. A team is optional.{" "}
-            <Link href="/admin/teams" className="text-primary underline-offset-4 hover:underline">
-              Manage teams
-            </Link>
+            They sign in with this PIN on their own page, then mark attendance there.
+            {teams.length > 0 ? (
+              <>
+                {" "}
+                A team is optional.{" "}
+                <Link href="/admin/teams" className="text-primary underline-offset-4 hover:underline">
+                  Manage teams
+                </Link>
+              </>
+            ) : null}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
@@ -66,17 +73,23 @@ export function NewEmployeeForm({ teams }: { teams: Array<{ id: string; name: st
             <Label htmlFor="new-code">Code</Label>
             <Input id="new-code" name="code" required placeholder="EMP-060" className="bg-card" />
           </div>
-          <div className="grid gap-2 sm:col-span-2">
-            <Label htmlFor="new-team">Team</Label>
-            <NativeSelect id="new-team" name="teamId" defaultValue="">
-              <option value="">No team</option>
-              {teams.map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.name}
-                </option>
-              ))}
-            </NativeSelect>
+          <div className="grid gap-2">
+            <Label htmlFor="new-pin">Sign-in PIN</Label>
+            <Input id="new-pin" name="pin" inputMode="numeric" autoComplete="off" required minLength={4} maxLength={8} pattern="[0-9]{4,8}" placeholder="4 to 8 digits" className="bg-card" />
           </div>
+          {teams.length > 0 ? (
+            <div className="grid gap-2">
+              <Label htmlFor="new-team">Team</Label>
+              <NativeSelect id="new-team" name="teamId" defaultValue="">
+                <option value="">No team</option>
+                {teams.map((team) => (
+                  <option key={team.id} value={team.id}>
+                    {team.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+          ) : null}
           {message ? <p className="text-sm text-destructive sm:col-span-2">{message}</p> : null}
         </CardContent>
         <CardFooter>

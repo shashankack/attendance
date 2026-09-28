@@ -1,33 +1,60 @@
 import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "fs";
-import path from "path";
+import { cache } from "react";
 
-import type { Attendance, AttendanceStatus, Database, Employee, Office, Team, User } from "./types";
+import { neon, NeonDbError } from "@neondatabase/serverless";
+import { revalidateTag, unstable_cache } from "next/cache";
+
+import { prepareDatabase } from "./schema.mjs";
 import { officeDate, officeMinutes } from "./time";
+import type { Attendance, AttendanceStatus, Employee, Office, Role, Team, User } from "./types";
 
 const START_MINUTES = 10 * 60;
-const dataDir = path.join(process.cwd(), "data");
-const dataFile = path.join(dataDir, "db.json");
 
-type LegacyEmployee = {
+type UserRow = {
   id: string;
-  userId?: string;
-  code: string;
-  firstName: string;
-  lastName: string;
-  email?: string;
-  department?: string;
-  teamId?: string | null;
-  officeId: string;
-  active: boolean;
+  email: string;
+  name: string;
+  role: Role;
+  password_hash: string;
+  session_token: string | null;
 };
 
-type LegacyFile = {
-  users: User[];
-  teams?: Team[];
-  employees: LegacyEmployee[];
-  office: Office;
-  attendance: Attendance[];
+type TeamRow = { id: string; name: string };
+
+type OfficeRow = {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  allowed_radius_meters: number;
+  timezone: string;
+  public_ip: string;
+  require_office_network: boolean;
+};
+
+type EmployeeRow = {
+  id: string;
+  code: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  team_id: string | null;
+  office_id: string;
+  active: boolean;
+  pin_hash: string | null;
+  session_token: string | null;
+};
+
+type AttendanceRow = {
+  id: string;
+  employee_id: string;
+  office_id: string;
+  date: string;
+  check_in_at: Date | string;
+  check_out_at: Date | string | null;
+  check_in_distance_meters: number;
+  check_out_distance_meters: number | null;
+  status: AttendanceStatus;
 };
 
 function hashPassword(password: string) {
@@ -44,261 +71,273 @@ export function verifyPassword(password: string, stored: string) {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
-function daysAgo(count: number) {
-  const date = new Date();
-  date.setDate(date.getDate() - count);
-  return date;
-}
-
-function atLocal(date: string, hour: number, minute: number) {
-  return new Date(
-    `${date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00+05:30`,
-  ).toISOString();
-}
-
-function seed(): Database {
-  const office: Office = {
-    id: crypto.randomUUID(),
-    name: "Bangalore HQ",
-    latitude: 12.9716,
-    longitude: 77.5946,
-    allowedRadiusMeters: 150,
-    timezone: "Asia/Kolkata",
-    publicIp: "",
-    requireOfficeNetwork: false,
-  };
-
-  const teams: Team[] = [
-    { id: crypto.randomUUID(), name: "Engineering" },
-    { id: crypto.randomUUID(), name: "Design" },
-    { id: crypto.randomUUID(), name: "Product" },
-    { id: crypto.randomUUID(), name: "Sales" },
-  ];
-  const teamId = (name: string) => teams.find((team) => team.name === name)?.id ?? null;
-
-  const admin: User = {
-    id: crypto.randomUUID(),
-    email: "admin@baw.dev",
-    name: "Priya Shah",
-    role: "ADMIN",
-    passwordHash: hashPassword("password"),
-  };
-
-  const people: Array<Omit<Employee, "id" | "officeId">> = [
-    { code: "EMP-014", firstName: "Arun", lastName: "Mehta", email: "arun@baw.dev", teamId: teamId("Engineering"), active: true },
-    { code: "EMP-021", firstName: "Meera", lastName: "Iyer", email: "meera@baw.dev", teamId: teamId("Engineering"), active: true },
-    { code: "EMP-033", firstName: "Kabir", lastName: "Das", email: "kabir@baw.dev", teamId: teamId("Design"), active: true },
-    { code: "EMP-040", firstName: "Sara", lastName: "Khan", email: "sara@baw.dev", teamId: teamId("Product"), active: true },
-    { code: "EMP-018", firstName: "Dev", lastName: "Patel", email: "dev@baw.dev", teamId: teamId("Engineering"), active: true },
-    { code: "EMP-052", firstName: "Neel", lastName: "Joshi", email: "neel@baw.dev", teamId: null, active: true },
-  ];
-
-  const employees: Employee[] = people.map((person) => ({
-    ...person,
-    id: crypto.randomUUID(),
-    officeId: office.id,
-  }));
-
-  const byName = (name: string) => employees.find((employee) => employee.firstName === name)!;
-  const today = officeDate(office.timezone);
-  const attendance: Attendance[] = [];
-
-  const add = (
-    firstName: string,
-    date: string,
-    inHour: number,
-    inMinute: number,
-    outHour?: number,
-    outMinute?: number,
-  ) => {
-    const status: AttendanceStatus = inHour * 60 + inMinute > START_MINUTES ? "LATE" : "PRESENT";
-    attendance.push({
-      id: crypto.randomUUID(),
-      employeeId: byName(firstName).id,
-      officeId: office.id,
-      date,
-      checkInAt: atLocal(date, inHour, inMinute),
-      checkOutAt: outHour == null ? null : atLocal(date, outHour, outMinute ?? 0),
-      checkInDistanceMeters: 18 + (inMinute % 7) * 4,
-      checkOutDistanceMeters: outHour == null ? null : 22,
-      status,
-    });
-  };
-
-  add("Meera", today, 9, 12);
-  add("Kabir", today, 9, 41);
-  add("Sara", today, 10, 18);
-  add("Dev", today, 9, 5, 18, 2);
-
-  for (let offset = 1; offset <= 12; offset += 1) {
-    const date = officeDate(office.timezone, daysAgo(offset));
-    const weekday = new Date(`${date}T12:00:00+05:30`).getDay();
-    if (weekday === 0 || weekday === 6) continue;
-    add("Arun", date, offset % 5 === 0 ? 10 : 9, 10 + offset, 18, 5);
-    add("Meera", date, 9, 8, 18, 10);
-    add("Kabir", date, 9, 30, 17, 50);
+function databaseUrl() {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    throw new Error("DATABASE_URL is missing. Add the Neon connection string in .env.local and in the Vercel project.");
   }
-
-  return { users: [admin], teams, employees, office, attendance };
+  return url;
 }
 
-function normalize(raw: LegacyFile): { db: Database; migrated: boolean } {
-  const teams: Team[] = Array.isArray(raw.teams) ? raw.teams.map((team) => ({ ...team })) : [];
-  const teamByName = new Map(teams.map((team) => [team.name.trim().toLowerCase(), team]));
-  let migrated = !Array.isArray(raw.teams);
+function db() {
+  return neon(databaseUrl());
+}
 
-  const ensureTeam = (name: string) => {
-    const trimmed = name.trim();
-    if (!trimmed) return null;
-    const existing = teamByName.get(trimmed.toLowerCase());
-    if (existing) return existing.id;
-    const team = { id: crypto.randomUUID(), name: trimmed };
-    teams.push(team);
-    teamByName.set(trimmed.toLowerCase(), team);
-    migrated = true;
-    return team.id;
-  };
+let ready: Promise<void> | null = null;
 
-  const usersById = new Map(raw.users.map((user) => [user.id, user]));
-  const employees: Employee[] = raw.employees.map((employee) => {
-    const account = employee.userId ? usersById.get(employee.userId) : undefined;
-    if (employee.userId || employee.department !== undefined || employee.teamId === undefined || !employee.email) {
-      migrated = true;
-    }
-    const teamId =
-      employee.teamId !== undefined ? employee.teamId : ensureTeam(employee.department ?? "");
-    return {
-      id: employee.id,
-      code: employee.code,
-      firstName: employee.firstName,
-      lastName: employee.lastName,
-      email: (employee.email ?? account?.email ?? "").trim().toLowerCase(),
-      teamId,
-      officeId: employee.officeId,
-      active: employee.active,
-    };
+function ensure() {
+  ready ??= prepareDatabase((statement: string) => db().query(statement)).catch((error: unknown) => {
+    ready = null;
+    throw error;
   });
+  return ready;
+}
 
-  const users = raw.users.filter((user) => user.role === "ADMIN");
-  if (users.length !== raw.users.length) migrated = true;
+function timestamp(value: Date | string | null) {
+  if (value == null) return null;
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
 
+function mapUser(row: UserRow): User {
   return {
-    migrated,
-    db: { users, teams, employees, office: raw.office, attendance: raw.attendance },
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    role: row.role,
+    passwordHash: row.password_hash,
+    sessionToken: row.session_token,
   };
 }
 
-function read(): Database {
-  try {
-    const parsed = JSON.parse(readFileSync(dataFile, "utf8")) as LegacyFile;
-    const { db, migrated } = normalize(parsed);
-    if (migrated) write(db);
-    return db;
-  } catch {
-    const seeded = seed();
-    mkdirSync(dataDir, { recursive: true });
-    writeFileSync(dataFile, JSON.stringify(seeded, null, 2));
-    return seeded;
-  }
+function mapTeam(row: TeamRow): Team {
+  return { id: row.id, name: row.name };
 }
 
-function write(db: Database) {
-  mkdirSync(dataDir, { recursive: true });
-  writeFileSync(dataFile, JSON.stringify(db, null, 2));
+function mapOffice(row: OfficeRow): Office {
+  return {
+    id: row.id,
+    name: row.name,
+    latitude: Number(row.latitude),
+    longitude: Number(row.longitude),
+    allowedRadiusMeters: Number(row.allowed_radius_meters),
+    timezone: row.timezone,
+    publicIp: row.public_ip,
+    requireOfficeNetwork: row.require_office_network,
+  };
 }
 
-let queue: Promise<unknown> = Promise.resolve();
-
-function update<T>(change: (db: Database) => T): Promise<T> {
-  const run = queue.then(() => {
-    const db = read();
-    const result = change(db);
-    write(db);
-    return result;
-  });
-  queue = run.then(
-    () => undefined,
-    () => undefined,
-  );
-  return run;
+function mapEmployee(row: EmployeeRow): Employee {
+  return {
+    id: row.id,
+    code: row.code,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    email: row.email,
+    teamId: row.team_id,
+    officeId: row.office_id,
+    active: row.active,
+    pinHash: row.pin_hash,
+    sessionToken: row.session_token,
+  };
 }
 
-export function getDatabase() {
-  return read();
+function mapAttendance(row: AttendanceRow): Attendance {
+  return {
+    id: row.id,
+    employeeId: row.employee_id,
+    officeId: row.office_id,
+    date: row.date,
+    checkInAt: timestamp(row.check_in_at) ?? "",
+    checkOutAt: timestamp(row.check_out_at),
+    checkInDistanceMeters: Number(row.check_in_distance_meters),
+    checkOutDistanceMeters: row.check_out_distance_meters == null ? null : Number(row.check_out_distance_meters),
+    status: row.status,
+  };
 }
+
+function isUnique(error: unknown) {
+  return error instanceof NeonDbError && error.code === "23505";
+}
+
+function expire(tag: string) {
+  revalidateTag(tag, { expire: 0 });
+}
+
+async function queryDirectory() {
+  await ensure();
+  const sql = db();
+  const [teams, employees, offices] = await Promise.all([
+    sql`SELECT id, name FROM teams ORDER BY name`,
+    sql`SELECT id, code, first_name, last_name, email, team_id, office_id, active, pin_hash FROM employees ORDER BY first_name, last_name`,
+    sql`SELECT id, name, latitude, longitude, allowed_radius_meters, timezone, public_ip, require_office_network FROM office LIMIT 1`,
+  ]);
+  const office = offices[0] as OfficeRow | undefined;
+  if (!office) throw new Error("The office record is missing.");
+  return {
+    teams: (teams as TeamRow[]).map(mapTeam),
+    employees: (employees as Array<Omit<EmployeeRow, "session_token">>).map((row) => mapEmployee({ ...row, session_token: null })),
+    office: mapOffice(office),
+  };
+}
+
+const loadDirectory = unstable_cache(queryDirectory, ["directory"], { tags: ["directory"], revalidate: 300 });
+
+async function queryMonth(month: string) {
+  await ensure();
+  const rows = (await db()`
+    SELECT id, employee_id, office_id, date, check_in_at, check_out_at, check_in_distance_meters, check_out_distance_meters, status
+    FROM attendance
+    WHERE date >= ${`${month}-01`} AND date <= ${`${month}-31`}
+    ORDER BY date
+  `) as AttendanceRow[];
+  return rows.map(mapAttendance);
+}
+
+const loadMonth = unstable_cache(queryMonth, ["attendance-month"], { tags: ["attendance"], revalidate: 60 });
+
+async function queryAdmin(id: string) {
+  await ensure();
+  const rows = (await db()`SELECT id, email, name, role FROM users WHERE id = ${id} LIMIT 1`) as Array<Pick<UserRow, "id" | "email" | "name" | "role">>;
+  const row = rows[0];
+  if (!row) return null;
+  return { id: row.id, email: row.email, name: row.name, role: row.role };
+}
+
+const loadAdmin = unstable_cache(queryAdmin, ["admin-profile"], { tags: ["admins"], revalidate: 3600 });
 
 export function teamName(teams: Team[], teamId: string | null) {
   if (!teamId) return null;
   return teams.find((team) => team.id === teamId)?.name ?? null;
 }
 
-export function findUserByEmail(email: string) {
-  return read().users.find((user) => user.email.toLowerCase() === email.toLowerCase()) ?? null;
+export const getDirectory = cache(() => loadDirectory());
+
+export const getMonthAttendance = cache((month: string) => loadMonth(month));
+
+export async function findUserByEmail(email: string) {
+  await ensure();
+  const sql = db();
+  const rows = (await sql`SELECT id, email, name, role, password_hash, session_token FROM users WHERE lower(email) = ${email.toLowerCase()} LIMIT 1`) as UserRow[];
+  return rows[0] ? mapUser(rows[0]) : null;
 }
 
-export function findUserById(id: string) {
-  return read().users.find((user) => user.id === id) ?? null;
+export const findUserById = cache(async (id: string) => {
+  const profile = await loadAdmin(id);
+  if (!profile) return null;
+  return { ...profile, passwordHash: "", sessionToken: null };
+});
+
+export async function sessionIsCurrent(input: { id: string; role: Role; sid: string }) {
+  await ensure();
+  const sql = db();
+  if (input.role === "ADMIN") {
+    const rows = await sql`SELECT id FROM users WHERE id = ${input.id} AND session_token = ${input.sid}`;
+    return rows.length > 0;
+  }
+  const rows = await sql`SELECT id FROM employees WHERE id = ${input.id} AND active = true AND session_token = ${input.sid}`;
+  return rows.length > 0;
 }
 
-export function getOffice() {
-  return read().office;
+export async function replaceSession(input: { id: string; role: Role }) {
+  await ensure();
+  const sid = crypto.randomUUID();
+  const sql = db();
+  if (input.role === "ADMIN") {
+    await sql`UPDATE users SET session_token = ${sid} WHERE id = ${input.id}`;
+  } else {
+    await sql`UPDATE employees SET session_token = ${sid} WHERE id = ${input.id}`;
+  }
+  return sid;
 }
 
-export function todayRecord(employeeId: string) {
-  const office = getOffice();
-  const date = officeDate(office.timezone);
-  return read().attendance.find((record) => record.employeeId === employeeId && record.date === date) ?? null;
+export async function endSession(input: { id: string; role: Role; sid: string }) {
+  await ensure();
+  const sql = db();
+  if (input.role === "ADMIN") {
+    await sql`UPDATE users SET session_token = NULL WHERE id = ${input.id} AND session_token = ${input.sid}`;
+    return;
+  }
+  await sql`UPDATE employees SET session_token = NULL WHERE id = ${input.id} AND session_token = ${input.sid}`;
 }
 
-export function historyFor(employeeId: string) {
-  return read()
-    .attendance.filter((record) => record.employeeId === employeeId)
-    .sort((a, b) => (a.date < b.date ? 1 : -1));
+export async function getOffice() {
+  return (await getDirectory()).office;
 }
 
 export async function saveOffice(next: Pick<Office, "name" | "latitude" | "longitude" | "allowedRadiusMeters" | "publicIp" | "requireOfficeNetwork">) {
-  return update((db) => {
-    db.office = { ...db.office, ...next };
-    return db.office;
-  });
+  await ensure();
+  const sql = db();
+  const rows = (await sql`
+    UPDATE office
+    SET name = ${next.name},
+        latitude = ${next.latitude},
+        longitude = ${next.longitude},
+        allowed_radius_meters = ${next.allowedRadiusMeters},
+        public_ip = ${next.publicIp},
+        require_office_network = ${next.requireOfficeNetwork}
+    RETURNING id, name, latitude, longitude, allowed_radius_meters, timezone, public_ip, require_office_network
+  `) as OfficeRow[];
+  const office = rows[0];
+  if (!office) throw new Error("The office record is missing.");
+  expire("directory");
+  return mapOffice(office);
 }
 
 export async function markCheckIn(input: { employeeId: string; distanceMeters: number }) {
-  return update((db) => {
-    const date = officeDate(db.office.timezone);
-    const existing = db.attendance.find((record) => record.employeeId === input.employeeId && record.date === date);
-    if (existing) return { ok: false as const, reason: "already-in" as const };
+  const office = await getOffice();
+  const sql = db();
 
-    const now = new Date();
-    const status: AttendanceStatus = officeMinutes(db.office.timezone, now) > START_MINUTES ? "LATE" : "PRESENT";
-    const record: Attendance = {
-      id: crypto.randomUUID(),
-      employeeId: input.employeeId,
-      officeId: db.office.id,
-      date,
-      checkInAt: now.toISOString(),
-      checkOutAt: null,
-      checkInDistanceMeters: Math.round(input.distanceMeters),
-      checkOutDistanceMeters: null,
-      status,
-    };
-    db.attendance.push(record);
-    return { ok: true as const, record };
-  });
+  const now = new Date();
+  const date = officeDate(office.timezone, now);
+  const status: AttendanceStatus = officeMinutes(office.timezone, now) > START_MINUTES ? "LATE" : "PRESENT";
+  const rows = (await sql`
+    INSERT INTO attendance (
+      id, employee_id, office_id, date, check_in_at, check_out_at,
+      check_in_distance_meters, check_out_distance_meters, status
+    )
+    VALUES (
+      ${crypto.randomUUID()}, ${input.employeeId}, ${office.id}, ${date}, ${now.toISOString()}, NULL,
+      ${Math.round(input.distanceMeters)}, NULL, ${status}
+    )
+    ON CONFLICT (employee_id, date) DO NOTHING
+    RETURNING id, employee_id, office_id, date, check_in_at, check_out_at, check_in_distance_meters, check_out_distance_meters, status
+  `) as AttendanceRow[];
+  const record = rows[0];
+  if (!record) return { ok: false as const, reason: "already-in" as const };
+  expire("attendance");
+  return { ok: true as const, record: mapAttendance(record) };
 }
 
-export function findEmployeeById(id: string) {
-  return read().employees.find((employee) => employee.id === id) ?? null;
+export async function markCheckOut(input: { employeeId: string; distanceMeters: number }) {
+  const office = await getOffice();
+  const sql = db();
+
+  const date = officeDate(office.timezone);
+  const existing = (await sql`SELECT check_out_at FROM attendance WHERE employee_id = ${input.employeeId} AND date = ${date}`) as Array<{ check_out_at: Date | string | null }>;
+  if (!existing[0]) return { ok: false as const, reason: "not-in" as const };
+  if (existing[0].check_out_at) return { ok: false as const, reason: "already-out" as const };
+
+  const rows = (await sql`
+    UPDATE attendance
+    SET check_out_at = ${new Date().toISOString()},
+        check_out_distance_meters = ${Math.round(input.distanceMeters)}
+    WHERE employee_id = ${input.employeeId} AND date = ${date} AND check_out_at IS NULL
+    RETURNING id, employee_id, office_id, date, check_in_at, check_out_at, check_in_distance_meters, check_out_distance_meters, status
+  `) as AttendanceRow[];
+  const record = rows[0];
+  if (!record) return { ok: false as const, reason: "already-out" as const };
+  expire("attendance");
+  return { ok: true as const, record: mapAttendance(record) };
 }
 
-export function attendanceInMonth(employeeId: string, month: string) {
-  return read()
-    .attendance.filter((record) => record.employeeId === employeeId && record.date.startsWith(`${month}-`))
-    .sort((a, b) => (a.date < b.date ? -1 : 1));
+export async function findEmployeeById(id: string) {
+  const directory = await getDirectory();
+  return directory.employees.find((employee) => employee.id === id) ?? null;
 }
 
-function teamExists(db: Database, teamId: string | null) {
-  return teamId == null || db.teams.some((team) => team.id === teamId);
+export async function attendanceInMonth(employeeId: string, month: string) {
+  const rows = await getMonthAttendance(month);
+  return rows.filter((row) => row.employeeId === employeeId);
 }
 
 export async function createEmployee(input: {
@@ -307,34 +346,44 @@ export async function createEmployee(input: {
   email: string;
   code: string;
   teamId: string | null;
+  pin: string;
 }) {
-  return update((db) => {
-    const email = input.email.trim().toLowerCase();
-    const code = input.code.trim().toUpperCase();
-    if (!teamExists(db, input.teamId)) return { ok: false as const, reason: "team" as const };
-    if (db.employees.some((employee) => employee.email.toLowerCase() === email)) {
-      return { ok: false as const, reason: "email" as const };
-    }
-    if (db.users.some((user) => user.email.toLowerCase() === email)) {
-      return { ok: false as const, reason: "email" as const };
-    }
-    if (db.employees.some((employee) => employee.code.toLowerCase() === code.toLowerCase())) {
-      return { ok: false as const, reason: "code" as const };
-    }
+  await ensure();
+  const sql = db();
+  const email = input.email.trim().toLowerCase();
+  const code = input.code.trim().toUpperCase();
+  if (input.teamId) {
+    const teams = await sql`SELECT id FROM teams WHERE id = ${input.teamId}`;
+    if (teams.length === 0) return { ok: false as const, reason: "team" as const };
+  }
+  const emailTaken = await sql`
+    SELECT id FROM employees WHERE lower(email) = ${email}
+    UNION ALL
+    SELECT id FROM users WHERE lower(email) = ${email}
+  `;
+  if (emailTaken.length > 0) return { ok: false as const, reason: "email" as const };
+  const codeTaken = await sql`SELECT id FROM employees WHERE lower(code) = ${code.toLowerCase()}`;
+  if (codeTaken.length > 0) return { ok: false as const, reason: "code" as const };
 
-    const employeeId = crypto.randomUUID();
-    db.employees.push({
-      id: employeeId,
-      code,
-      firstName: input.firstName.trim(),
-      lastName: input.lastName.trim(),
-      email,
-      teamId: input.teamId,
-      officeId: db.office.id,
-      active: true,
-    });
-    return { ok: true as const, employeeId };
-  });
+  const offices = (await sql`SELECT id FROM office LIMIT 1`) as Array<{ id: string }>;
+  const office = offices[0];
+  if (!office) return { ok: false as const, reason: "missing" as const };
+
+  const employeeId = crypto.randomUUID();
+  try {
+    await sql`
+      INSERT INTO employees (id, code, first_name, last_name, email, team_id, office_id, active, pin_hash, session_token)
+      VALUES (
+        ${employeeId}, ${code}, ${input.firstName.trim()}, ${input.lastName.trim()}, ${email},
+        ${input.teamId}, ${office.id}, true, ${hashPassword(input.pin)}, NULL
+      )
+    `;
+  } catch (error) {
+    if (!isUnique(error)) throw error;
+    return { ok: false as const, reason: "email" as const };
+  }
+  expire("directory");
+  return { ok: true as const, employeeId };
 }
 
 export async function updateEmployee(input: {
@@ -345,81 +394,83 @@ export async function updateEmployee(input: {
   code: string;
   teamId: string | null;
   active: boolean;
+  pin: string | null;
 }) {
-  return update((db) => {
-    const employee = db.employees.find((item) => item.id === input.employeeId);
-    if (!employee) return { ok: false as const, reason: "missing" as const };
-    if (!teamExists(db, input.teamId)) return { ok: false as const, reason: "team" as const };
+  await ensure();
+  const sql = db();
+  const current = await sql`SELECT id FROM employees WHERE id = ${input.employeeId}`;
+  if (current.length === 0) return { ok: false as const, reason: "missing" as const };
+  if (input.teamId) {
+    const teams = await sql`SELECT id FROM teams WHERE id = ${input.teamId}`;
+    if (teams.length === 0) return { ok: false as const, reason: "team" as const };
+  }
 
-    const email = input.email.trim().toLowerCase();
-    const code = input.code.trim().toUpperCase();
-    if (db.employees.some((item) => item.id !== employee.id && item.email.toLowerCase() === email)) {
-      return { ok: false as const, reason: "email" as const };
-    }
-    if (db.users.some((user) => user.email.toLowerCase() === email)) {
-      return { ok: false as const, reason: "email" as const };
-    }
-    if (db.employees.some((item) => item.id !== employee.id && item.code.toLowerCase() === code.toLowerCase())) {
-      return { ok: false as const, reason: "code" as const };
-    }
+  const email = input.email.trim().toLowerCase();
+  const code = input.code.trim().toUpperCase();
+  const emailTaken = await sql`
+    SELECT id FROM employees WHERE id <> ${input.employeeId} AND lower(email) = ${email}
+    UNION ALL
+    SELECT id FROM users WHERE lower(email) = ${email}
+  `;
+  if (emailTaken.length > 0) return { ok: false as const, reason: "email" as const };
+  const codeTaken = await sql`SELECT id FROM employees WHERE id <> ${input.employeeId} AND lower(code) = ${code.toLowerCase()}`;
+  if (codeTaken.length > 0) return { ok: false as const, reason: "code" as const };
 
-    employee.firstName = input.firstName.trim();
-    employee.lastName = input.lastName.trim();
-    employee.email = email;
-    employee.code = code;
-    employee.teamId = input.teamId;
-    employee.active = input.active;
-    return { ok: true as const };
-  });
+  const pinHash = input.pin ? hashPassword(input.pin) : null;
+  try {
+    await sql`
+      UPDATE employees
+      SET first_name = ${input.firstName.trim()},
+          last_name = ${input.lastName.trim()},
+          email = ${email},
+          code = ${code},
+          team_id = ${input.teamId},
+          active = ${input.active},
+          pin_hash = COALESCE(${pinHash}, pin_hash)
+      WHERE id = ${input.employeeId}
+    `;
+  } catch (error) {
+    if (!isUnique(error)) throw error;
+    return { ok: false as const, reason: "email" as const };
+  }
+  expire("directory");
+  return { ok: true as const };
 }
 
 export async function createTeam(name: string) {
-  return update((db) => {
-    const trimmed = name.trim();
-    if (!trimmed) return { ok: false as const, reason: "empty" as const };
-    if (db.teams.some((team) => team.name.toLowerCase() === trimmed.toLowerCase())) {
-      return { ok: false as const, reason: "name" as const };
-    }
-    const team = { id: crypto.randomUUID(), name: trimmed };
-    db.teams.push(team);
-    return { ok: true as const, team };
-  });
+  await ensure();
+  const trimmed = name.trim();
+  if (!trimmed) return { ok: false as const, reason: "empty" as const };
+  const team = { id: crypto.randomUUID(), name: trimmed };
+  try {
+    await db()`INSERT INTO teams (id, name) VALUES (${team.id}, ${team.name})`;
+  } catch (error) {
+    if (!isUnique(error)) throw error;
+    return { ok: false as const, reason: "name" as const };
+  }
+  expire("directory");
+  return { ok: true as const, team };
 }
 
 export async function renameTeam(id: string, name: string) {
-  return update((db) => {
-    const team = db.teams.find((item) => item.id === id);
-    if (!team) return { ok: false as const, reason: "missing" as const };
-    const trimmed = name.trim();
-    if (!trimmed) return { ok: false as const, reason: "empty" as const };
-    if (db.teams.some((item) => item.id !== id && item.name.toLowerCase() === trimmed.toLowerCase())) {
-      return { ok: false as const, reason: "name" as const };
-    }
-    team.name = trimmed;
-    return { ok: true as const };
-  });
+  await ensure();
+  const trimmed = name.trim();
+  if (!trimmed) return { ok: false as const, reason: "empty" as const };
+  try {
+    const rows = await db()`UPDATE teams SET name = ${trimmed} WHERE id = ${id} RETURNING id`;
+    if (rows.length === 0) return { ok: false as const, reason: "missing" as const };
+  } catch (error) {
+    if (!isUnique(error)) throw error;
+    return { ok: false as const, reason: "name" as const };
+  }
+  expire("directory");
+  return { ok: true as const };
 }
 
 export async function deleteTeam(id: string) {
-  return update((db) => {
-    const index = db.teams.findIndex((team) => team.id === id);
-    if (index < 0) return { ok: false as const, reason: "missing" as const };
-    db.teams.splice(index, 1);
-    for (const employee of db.employees) {
-      if (employee.teamId === id) employee.teamId = null;
-    }
-    return { ok: true as const };
-  });
-}
-
-export async function markCheckOut(input: { employeeId: string; distanceMeters: number }) {
-  return update((db) => {
-    const date = officeDate(db.office.timezone);
-    const existing = db.attendance.find((record) => record.employeeId === input.employeeId && record.date === date);
-    if (!existing) return { ok: false as const, reason: "not-in" as const };
-    if (existing.checkOutAt) return { ok: false as const, reason: "already-out" as const };
-    existing.checkOutAt = new Date().toISOString();
-    existing.checkOutDistanceMeters = Math.round(input.distanceMeters);
-    return { ok: true as const, record: existing };
-  });
+  await ensure();
+  const rows = await db()`DELETE FROM teams WHERE id = ${id} RETURNING id`;
+  if (rows.length === 0) return { ok: false as const, reason: "missing" as const };
+  expire("directory");
+  return { ok: true as const };
 }

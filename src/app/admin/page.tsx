@@ -8,19 +8,18 @@ import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { currentUser } from "@/lib/actions";
-import { getDatabase, teamName } from "@/lib/store";
+import { getDirectory, getMonthAttendance, teamName } from "@/lib/store";
 import { formatClock, formatLongDay, officeDate } from "@/lib/time";
-
-export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
   const user = await currentUser();
   if (!user || user.role !== "ADMIN") redirect("/login");
 
-  const db = getDatabase();
-  const today = officeDate(db.office.timezone);
-  const todays = db.attendance.filter((record) => record.date === today);
-  const employees = db.employees.filter((employee) => employee.active);
+  const directory = await getDirectory();
+  const today = officeDate(directory.office.timezone);
+  const attendance = await getMonthAttendance(today.slice(0, 7));
+  const todays = attendance.filter((record) => record.date === today);
+  const employees = directory.employees.filter((employee) => employee.active);
 
   const rows = employees.map((employee) => {
     const record = todays.find((item) => item.employeeId === employee.id) ?? null;
@@ -40,8 +39,8 @@ export default async function AdminPage() {
   ];
 
   return (
-    <Shell name={user.name} role={user.role} day={formatLongDay(db.office.timezone)}>
-      <PageHeader eyebrow={db.office.name} title="Who is here" />
+    <Shell name={user.name} role={user.role} day={formatLongDay(directory.office.timezone)} showTeams={directory.teams.length > 0}>
+      <PageHeader eyebrow={directory.office.name} title="Who is here" />
       <div className="mt-6 grid gap-3 sm:grid-cols-4">
         {stats.map((stat) => (
           <Card key={stat.label} size="sm">
@@ -58,7 +57,7 @@ export default async function AdminPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Employee</TableHead>
-                <TableHead>Team</TableHead>
+                {directory.teams.length > 0 ? <TableHead>Team</TableHead> : null}
                 <TableHead>In</TableHead>
                 <TableHead>Out</TableHead>
                 <TableHead>Status</TableHead>
@@ -76,9 +75,11 @@ export default async function AdminPage() {
                       </Link>
                       <span className="ml-2 text-muted-foreground">{employee.code}</span>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{teamName(db.teams, employee.teamId) ?? "—"}</TableCell>
-                    <TableCell>{record ? formatClock(record.checkInAt, db.office.timezone) : "—"}</TableCell>
-                    <TableCell>{record?.checkOutAt ? formatClock(record.checkOutAt, db.office.timezone) : "—"}</TableCell>
+                    {directory.teams.length > 0 ? (
+                      <TableCell className="text-muted-foreground">{teamName(directory.teams, employee.teamId) ?? "—"}</TableCell>
+                    ) : null}
+                    <TableCell>{record ? formatClock(record.checkInAt, directory.office.timezone) : "—"}</TableCell>
+                    <TableCell>{record?.checkOutAt ? formatClock(record.checkOutAt, directory.office.timezone) : "—"}</TableCell>
                     <TableCell>
                       <StatusBadge tone={tone}>{label}</StatusBadge>
                     </TableCell>
@@ -90,7 +91,7 @@ export default async function AdminPage() {
         </CardContent>
       </Card>
       <div className="mt-8">
-        <OfficeEditor office={db.office} />
+        <OfficeEditor office={directory.office} />
       </div>
     </Shell>
   );

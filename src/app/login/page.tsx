@@ -16,7 +16,7 @@ export default async function LoginPage() {
         <div>
           <h1 className="max-w-xl font-serif text-5xl leading-[1.05] tracking-tight sm:text-6xl">Admin desk.</h1>
           <p className="mt-6 max-w-md text-lg text-sidebar-foreground/75">
-            People mark attendance from the front desk by tapping their name. This sign-in is only for managing the office.
+            Each person signs in on their own page with a PIN, then marks attendance there. This sign-in is for managing the office.
           </p>
         </div>
         <Link href="/" className="text-sm text-sidebar-foreground/70 underline-offset-4 hover:text-sidebar-foreground hover:underline">
@@ -27,7 +27,7 @@ export default async function LoginPage() {
         <Card className="mx-auto w-full max-w-md">
           <CardHeader>
             <CardTitle className="font-serif text-3xl">Sign in</CardTitle>
-            <CardDescription>Admin password is password.</CardDescription>
+            <CardDescription>Sign in with the admin email and password.</CardDescription>
           </CardHeader>
           <CardContent>
             <LoginForm />

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LogOut } from "lucide-react";
 
+import { Logo } from "@/components/logo";
+import { SessionWatch } from "@/components/session-watch";
 import { logout } from "@/lib/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,27 +23,30 @@ export function Shell({
   name,
   role,
   day,
+  showTeams = true,
   children,
 }: {
   name: string;
   role: "ADMIN" | "EMPLOYEE";
   day: string;
+  showTeams?: boolean;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const nav = links.filter((link) => link.href !== "/admin/teams" || showTeams || pathname.startsWith("/admin/teams"));
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <SessionWatch href={role === "ADMIN" ? "/login" : "/"} />
       <header className="sticky top-0 z-20 border-b bg-card/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-5 py-3">
           <div className="flex items-center gap-5">
-            <Link href={role === "ADMIN" ? "/admin" : "/"} className="flex items-center gap-2 font-serif text-xl tracking-tight">
-              <span className="grid size-8 place-items-center rounded-lg bg-primary text-sm text-primary-foreground">B</span>
-              BAW
+            <Link href={role === "ADMIN" ? "/admin" : "/"} className="flex items-center" aria-label="BAW">
+              <Logo />
             </Link>
             {role === "ADMIN" ? (
               <nav className="flex flex-wrap gap-1">
-                {links.map((link) => (
+                {nav.map((link) => (
                   <Link
                     key={link.href}
                     href={link.href}
@@ -63,7 +68,7 @@ export function Shell({
             <form action={logout}>
               <Button type="submit" variant="ghost" size="sm">
                 <LogOut />
-                Sign out
+                {role === "ADMIN" ? "Sign out" : "Log off"}
               </Button>
             </form>
           </div>

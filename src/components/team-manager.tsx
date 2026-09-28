@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { addTeam, editTeam, removeTeam } from "@/lib/actions";
@@ -70,33 +70,65 @@ export function TeamManager({
       <Card className="gap-0 py-0">
         {teams.length === 0 ? <p className="px-4 py-6 text-sm text-muted-foreground">No teams yet. People can still be added without one.</p> : null}
         {teams.map((team, index) => (
-          <div key={team.id}>
-            {index > 0 ? <Separator /> : null}
-            <form
-              className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const nextName = String(new FormData(event.currentTarget).get("name") ?? "");
-                void rename(team.id, nextName);
-              }}
-            >
-              <Input name="name" defaultValue={team.name} required className="bg-card sm:max-w-sm" />
-              <Badge variant="secondary" className="h-6 w-fit">
-                {team.count === 1 ? "1 person" : `${team.count} people`}
-              </Badge>
-              <div className="flex gap-2 sm:ml-auto">
-                <Button type="submit" variant="outline" disabled={pending}>
-                  Save
-                </Button>
-                <Button type="button" variant="ghost" disabled={pending} onClick={() => void remove(team.id, team.name, team.count)} className="text-destructive">
-                  Delete
-                </Button>
-              </div>
-            </form>
-          </div>
+          <TeamRow
+            key={team.id}
+            team={team}
+            pending={pending}
+            divided={index > 0}
+            onRename={rename}
+            onRemove={remove}
+          />
         ))}
       </Card>
       {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
+    </div>
+  );
+}
+
+function TeamRow({
+  team,
+  pending,
+  divided,
+  onRename,
+  onRemove,
+}: {
+  team: { id: string; name: string; count: number };
+  pending: boolean;
+  divided: boolean;
+  onRename: (id: string, name: string) => Promise<void>;
+  onRemove: (id: string, teamName: string, count: number) => Promise<void>;
+}) {
+  const [name, setName] = useState(team.name);
+  const dirty = name !== team.name;
+
+  useEffect(() => {
+    setName(team.name);
+  }, [team.id, team.name]);
+
+  return (
+    <div>
+      {divided ? <Separator /> : null}
+      <form
+        className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!dirty) return;
+          void onRename(team.id, name);
+        }}
+      >
+        <Input name="name" value={name} onChange={(event) => setName(event.target.value)} required className="bg-card sm:max-w-sm" />
+        <Badge variant="secondary" className="h-6 w-fit">
+          {team.count === 1 ? "1 person" : `${team.count} people`}
+        </Badge>
+        <div className="flex gap-2 sm:ml-auto">
+          <Button type="submit" variant="outline" disabled={!dirty || pending}>
+            Save
+          </Button>
+          <Button type="button" variant="ghost" disabled={pending} onClick={() => void onRemove(team.id, team.name, team.count)} className="text-destructive">
+            Delete
+          </Button>
+        </div>
+      </form>
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 
 import { distanceMeters } from "./geo";
 import { readSession, signSession } from "./session";
@@ -11,12 +12,15 @@ import {
   deleteTeam,
   findEmployeeById,
   findUserByEmail,
+  endSession,
   findUserById,
   getOffice,
   markCheckIn,
   markCheckOut,
   renameTeam,
+  replaceSession,
   saveOffice,
+  sessionIsCurrent,
   updateEmployee,
   verifyPassword,
 } from "./store";
@@ -28,26 +32,52 @@ function publicUser(user: { id: string; email: string; name: string; role: Publi
   return { id: user.id, email: user.email, name: user.name, role: user.role };
 }
 
-export async function currentUser() {
+const requestSession = cache(async () => {
   const jar = await cookies();
-  const session = readSession(jar.get("session")?.value);
-  if (!session) return null;
-  const user = findUserById(session.id);
+  return readSession(jar.get("session")?.value);
+});
+
+export async function currentUser() {
+  const session = await requestSession();
+  if (!session || session.role !== "ADMIN") return null;
+  const user = await findUserById(session.id);
   if (!user) return null;
   return publicUser(user);
+}
+
+export async function currentEmployee(options?: { live?: boolean }) {
+  const session = await requestSession();
+  if (!session || session.role !== "EMPLOYEE") return null;
+  if (options?.live && !(await sessionIsCurrent(session))) return null;
+  const employee = await findEmployeeById(session.id);
+  if (!employee || !employee.active) return null;
+  return employee;
+}
+
+async function liveAdmin() {
+  const session = await requestSession();
+  if (!session || session.role !== "ADMIN" || !(await sessionIsCurrent(session))) return null;
+  const user = await findUserById(session.id);
+  if (!user) return null;
+  return publicUser(user);
+}
+
+function validPin(pin: string) {
+  return /^\d{4,8}$/.test(pin);
 }
 
 export async function login(formData: FormData): Promise<ActionResult> {
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
-  const user = findUserByEmail(email);
+  const user = await findUserByEmail(email);
 
   if (!user || user.role !== "ADMIN" || !verifyPassword(password, user.passwordHash)) {
     return { ok: false, message: "That admin email and password do not match." };
   }
 
   const jar = await cookies();
-  jar.set("session", signSession(user), {
+  const sid = await replaceSession({ id: user.id, role: "ADMIN" });
+  jar.set("session", signSession({ id: user.id, role: "ADMIN", sid }), {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
@@ -57,14 +87,44 @@ export async function login(formData: FormData): Promise<ActionResult> {
   redirect("/admin");
 }
 
+export async function sessionAlive() {
+  const jar = await cookies();
+  const session = await requestSession();
+  if (!session || !(await sessionIsCurrent(session))) {
+    if (session) jar.delete("session");
+    return false;
+  }
+  return true;
+}
+
+export async function signInEmployee(employeeId: string, pin: string): Promise<ActionResult> {
+  const employee = await findEmployeeById(employeeId);
+  if (!employee || !employee.active) return { ok: false, message: "That person cannot sign in." };
+  if (!employee.pinHash) return { ok: false, message: "Ask an admin to set your sign-in PIN." };
+  if (!verifyPassword(pin, employee.pinHash)) return { ok: false, message: "That PIN does not match." };
+
+  const jar = await cookies();
+  const sid = await replaceSession({ id: employee.id, role: "EMPLOYEE" });
+  jar.set("session", signSession({ id: employee.id, role: "EMPLOYEE", sid }), {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 7,
+  });
+
+  redirect("/me");
+}
+
 export async function logout() {
   const jar = await cookies();
+  const session = readSession(jar.get("session")?.value);
+  if (session) await endSession(session);
   jar.delete("session");
   redirect("/");
 }
 
 async function requireAdmin() {
-  const user = await currentUser();
+  const user = await liveAdmin();
   if (!user || user.role !== "ADMIN") return null;
   return user;
 }
@@ -72,22 +132,63 @@ async function requireAdmin() {
 async function clientIp() {
   const headerStore = await headers();
   const forwarded = headerStore.get("x-forwarded-for");
-  return forwarded?.split(",")[0]?.trim() || headerStore.get("x-real-ip") || "";
+  const raw = forwarded?.split(",")[0]?.trim() || headerStore.get("x-real-ip") || "";
+  return raw.startsWith("::ffff:") ? raw.slice(7) : raw;
+}
+
+function isPublicAddress(ip: string) {
+  if (!ip || ip === "::1") return false;
+  if (ip.includes(":")) {
+    const lower = ip.toLowerCase();
+    return !lower.startsWith("fe80") && !lower.startsWith("fc") && !lower.startsWith("fd");
+  }
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+  const [a, b] = parts;
+  if (a === 10 || a === 127 || a === 0) return false;
+  if (a === 192 && b === 168) return false;
+  if (a === 172 && b >= 16 && b <= 31) return false;
+  if (a === 169 && b === 254) return false;
+  if (a === 100 && b >= 64 && b <= 127) return false;
+  return a >= 1 && a <= 223;
+}
+
+async function wifiBlock() {
+  const office = await getOffice();
+  if (!office.requireOfficeNetwork) return null;
+  const ip = await clientIp();
+  if (!office.publicIp || ip !== office.publicIp) {
+    return "Connect to the office Wi-Fi before marking attendance.";
+  }
+  return null;
+}
+
+export async function officeWifi(): Promise<{ ok: true; ip: string; seenByServer: boolean } | { ok: false; message: string }> {
+  if (!(await requireAdmin())) return { ok: false, message: "Only an admin can read the office Wi-Fi." };
+  const ip = await clientIp();
+  if (isPublicAddress(ip)) return { ok: true, ip, seenByServer: true };
+  return { ok: true, ip: "", seenByServer: false };
+}
+
+export async function onOfficeWifi() {
+  const office = await getOffice();
+  if (!office.requireOfficeNetwork) return true;
+  const ip = await clientIp();
+  return Boolean(office.publicIp) && ip === office.publicIp;
 }
 
 function locationError(distance: number, radius: number) {
-  return `You are ${Math.round(distance)} m from the office. Check-in is allowed within ${radius} m.`;
+  return `You are ${Math.round(distance)} m from the office. Marking is allowed within ${radius} m.`;
 }
 
 export async function checkIn(input: {
-  employeeId: string;
   latitude: number;
   longitude: number;
   accuracy: number;
 }): Promise<ActionResult> {
-  const employee = findEmployeeById(input.employeeId);
-  if (!employee || !employee.active) return { ok: false, message: "That person is not on the desk." };
-  const office = getOffice();
+  const employee = await currentEmployee({ live: true });
+  if (!employee) return { ok: false, message: "Sign in before marking attendance." };
+  const office = await getOffice();
 
   if (!Number.isFinite(input.latitude) || !Number.isFinite(input.longitude)) {
     return { ok: false, message: "A location reading is required." };
@@ -105,27 +206,27 @@ export async function checkIn(input: {
     return { ok: false, message: locationError(distance, office.allowedRadiusMeters) };
   }
 
-  if (office.requireOfficeNetwork) {
-    const ip = await clientIp();
-    if (!office.publicIp || ip !== office.publicIp) {
-      return { ok: false, message: "This request is not coming from the office network." };
-    }
-  }
+  const blocked = await wifiBlock();
+  if (blocked) return { ok: false, message: blocked };
 
   const result = await markCheckIn({ employeeId: employee.id, distanceMeters: distance });
-  if (!result.ok) return { ok: false, message: "You have already checked in today." };
+  if (!result.ok) return { ok: false, message: "Attendance is already marked for today." };
   return { ok: true };
 }
 
 export async function checkOut(input: {
-  employeeId: string;
   latitude: number;
   longitude: number;
   accuracy: number;
 }): Promise<ActionResult> {
-  const employee = findEmployeeById(input.employeeId);
-  if (!employee || !employee.active) return { ok: false, message: "That person is not on the desk." };
-  const office = getOffice();
+  const employee = await currentEmployee({ live: true });
+  if (!employee) return { ok: false, message: "Sign in before marking attendance." };
+  const office = await getOffice();
+
+  if (!Number.isFinite(input.latitude) || !Number.isFinite(input.longitude)) {
+    return { ok: false, message: "A location reading is required." };
+  }
+
   const distance = distanceMeters(input.latitude, input.longitude, office.latitude, office.longitude);
 
   if (input.accuracy > office.allowedRadiusMeters) {
@@ -138,6 +239,9 @@ export async function checkOut(input: {
   if (distance > office.allowedRadiusMeters) {
     return { ok: false, message: locationError(distance, office.allowedRadiusMeters) };
   }
+
+  const blocked = await wifiBlock();
+  if (blocked) return { ok: false, message: blocked };
 
   const result = await markCheckOut({ employeeId: employee.id, distanceMeters: distance });
   if (!result.ok && result.reason === "not-in") {
@@ -155,7 +259,7 @@ export async function updateOffice(input: {
   publicIp: string;
   requireOfficeNetwork: boolean;
 }): Promise<ActionResult> {
-  const user = await currentUser();
+  const user = await liveAdmin();
   if (!user || user.role !== "ADMIN") return { ok: false, message: "Only an admin can change the office." };
 
   const name = input.name.trim();
@@ -194,6 +298,7 @@ export async function addEmployee(input: {
   email: string;
   code: string;
   teamId: string | null;
+  pin: string;
 }): Promise<ActionResult & { employeeId?: string }> {
   if (!(await requireAdmin())) return { ok: false, message: "Only an admin can add employees." };
   if (!input.firstName.trim() || !input.lastName.trim() || !input.code.trim()) {
@@ -202,6 +307,7 @@ export async function addEmployee(input: {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim())) {
     return { ok: false, message: "Enter a valid email." };
   }
+  if (!validPin(input.pin)) return { ok: false, message: "The sign-in PIN must be 4 to 8 digits." };
 
   const result = await createEmployee(input);
   if (!result.ok) return { ok: false, message: employeeMessage(result.reason) };
@@ -216,6 +322,7 @@ export async function editEmployee(input: {
   code: string;
   teamId: string | null;
   active: boolean;
+  pin: string;
 }): Promise<ActionResult> {
   if (!(await requireAdmin())) return { ok: false, message: "Only an admin can edit employees." };
   if (!input.firstName.trim() || !input.lastName.trim() || !input.code.trim()) {
@@ -224,8 +331,10 @@ export async function editEmployee(input: {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim())) {
     return { ok: false, message: "Enter a valid email." };
   }
+  const pin = input.pin.trim();
+  if (pin && !validPin(pin)) return { ok: false, message: "The sign-in PIN must be 4 to 8 digits." };
 
-  const result = await updateEmployee(input);
+  const result = await updateEmployee({ ...input, pin: pin || null });
   if (!result.ok) return { ok: false, message: employeeMessage(result.reason) };
   return { ok: true };
 }
