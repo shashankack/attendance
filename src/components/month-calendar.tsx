@@ -44,9 +44,25 @@ export function MonthCalendar({
         const holiday = holidayOn(date, holidays);
         const off = !isExpected(date, workDays, holidays);
         const future = date > today;
-        const label = future ? "" : record ? (record.status === "LATE" ? "L" : "P") : off ? "" : "–";
+        const label = future
+          ? ""
+          : record?.status === "LATE"
+            ? "L"
+            : record?.status === "PRESENT"
+              ? "P"
+              : record?.status === "ABSENT"
+                ? "A"
+                : off
+                  ? ""
+                  : "–";
         const chip =
-          label === "L" ? "bg-destructive/10 text-destructive" : label === "P" ? "bg-primary/15 text-primary" : "text-muted-foreground";
+          label === "L"
+            ? "bg-destructive/10 text-destructive"
+            : label === "P"
+              ? "bg-primary/15 text-primary"
+              : label === "A"
+                ? "bg-muted text-muted-foreground"
+                : "text-muted-foreground";
 
         return (
           <div
@@ -63,8 +79,10 @@ export function MonthCalendar({
                 <span className={cn("inline-flex size-6 items-center justify-center rounded-md text-[11px] font-medium", chip)}>{label}</span>
               ) : null}
             </div>
-            {holiday && !record ? <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">{holiday.name}</p> : null}
-            {record ? (
+            {holiday && (!record || record.status === "ABSENT") ? (
+              <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">{holiday.name}</p>
+            ) : null}
+            {record?.checkInAt ? (
               <p className="mt-auto pt-2 text-[11px] leading-4 text-muted-foreground">
                 {formatClock(record.checkInAt, timeZone)}
                 {record.checkOutAt ? ` – ${formatClock(record.checkOutAt, timeZone)}` : ""}

@@ -27,16 +27,16 @@ export default async function AdminPage() {
     return { employee, record };
   });
 
-  const onSite = rows.filter((row) => row.record && !row.record.checkOutAt).length;
+  const onSite = rows.filter((row) => row.record && row.record.status !== "ABSENT" && !row.record.checkOutAt).length;
   const left = rows.filter((row) => row.record?.checkOutAt).length;
   const late = rows.filter((row) => row.record?.status === "LATE").length;
-  const absent = rows.filter((row) => !row.record).length;
+  const absent = rows.filter((row) => !row.record || row.record.status === "ABSENT").length;
 
   const stats = [
     { label: "On site", value: onSite },
     { label: "Left", value: left },
     { label: "Late", value: late },
-    { label: "Not in", value: absent },
+    { label: "Absent", value: absent },
   ];
 
   return (
@@ -66,8 +66,24 @@ export default async function AdminPage() {
             </TableHeader>
             <TableBody>
               {rows.map(({ employee, record }) => {
-                const tone = !record ? "absent" : record.checkOutAt ? "left" : record.status === "LATE" ? "late" : "in";
-                const label = !record ? "Not in" : record.checkOutAt ? "Left" : record.status === "LATE" ? "Late" : "In";
+                const tone =
+                  !record || record.status === "ABSENT"
+                    ? "absent"
+                    : record.checkOutAt
+                      ? "left"
+                      : record.status === "LATE"
+                        ? "late"
+                        : "in";
+                const label =
+                  !record || record.status === "ABSENT"
+                    ? record?.status === "ABSENT"
+                      ? "Absent"
+                      : "Not in"
+                    : record.checkOutAt
+                      ? "Left"
+                      : record.status === "LATE"
+                        ? "Late"
+                        : "In";
                 return (
                   <TableRow key={employee.id}>
                     <TableCell>
@@ -79,7 +95,9 @@ export default async function AdminPage() {
                     {directory.teams.length > 0 ? (
                       <TableCell className="text-muted-foreground">{teamName(directory.teams, employee.teamId) ?? "—"}</TableCell>
                     ) : null}
-                    <TableCell>{record ? formatClock(record.checkInAt, directory.office.timezone) : "—"}</TableCell>
+                    <TableCell>
+                      {record?.checkInAt ? formatClock(record.checkInAt, directory.office.timezone) : "—"}
+                    </TableCell>
                     <TableCell>{record?.checkOutAt ? formatClock(record.checkOutAt, directory.office.timezone) : "—"}</TableCell>
                     <TableCell>
                       <StatusBadge tone={tone}>{label}</StatusBadge>

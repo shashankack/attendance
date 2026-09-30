@@ -32,8 +32,10 @@ const statements = [
     office_id text NOT NULL REFERENCES office (id),
     active boolean NOT NULL,
     pin_hash text,
-    session_token text
+    session_token text,
+    device_token_hash text
   )`,
+  `ALTER TABLE employees ADD COLUMN IF NOT EXISTS device_token_hash text`,
   `CREATE UNIQUE INDEX IF NOT EXISTS employees_email_lower ON employees (lower(email))`,
   `CREATE UNIQUE INDEX IF NOT EXISTS employees_code_lower ON employees (lower(code))`,
   `CREATE TABLE IF NOT EXISTS attendance (
@@ -48,6 +50,8 @@ const statements = [
     status text NOT NULL,
     UNIQUE (employee_id, date)
   )`,
+  `ALTER TABLE attendance ALTER COLUMN check_in_at DROP NOT NULL`,
+  `ALTER TABLE attendance ALTER COLUMN check_in_distance_meters DROP NOT NULL`,
   `INSERT INTO office (id, name, latitude, longitude, allowed_radius_meters, timezone, public_ip, require_office_network)
    VALUES ('office', 'Office', 0, 0, 150, 'Asia/Kolkata', '', false)
    ON CONFLICT (id) DO NOTHING`,

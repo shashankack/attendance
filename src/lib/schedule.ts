@@ -35,6 +35,14 @@ export function arrivalStatus(minutes: number, date: string, workDays: WorkDay[]
   return minutes > start ? ("LATE" as const) : ("PRESENT" as const);
 }
 
+export function dayIsClosed(date: string, today: string, nowMinutes: number, workDays: WorkDay[], holidays: Holiday[]) {
+  if (!isExpected(date, workDays, holidays)) return false;
+  if (date < today) return true;
+  if (date > today) return false;
+  const end = workDayFor(date, workDays)?.endMinutes ?? 18 * 60;
+  return nowMinutes > end;
+}
+
 export function minutesToInput(minutes: number) {
   const hour = Math.floor(minutes / 60);
   const minute = minutes % 60;

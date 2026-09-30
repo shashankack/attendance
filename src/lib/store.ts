@@ -4,9 +4,9 @@ import { cache } from "react";
 import { neon, NeonDbError } from "@neondatabase/serverless";
 import { revalidateTag, unstable_cache } from "next/cache";
 
-import { arrivalStatus } from "./schedule";
+import { arrivalStatus, dayIsClosed, isExpected } from "./schedule";
 import { prepareDatabase } from "./schema.mjs";
-import { officeDate, officeMinutes } from "./time";
+import { daysOfMonth, officeDate, officeMinutes } from "./time";
 import type { Attendance, AttendanceStatus, Employee, Holiday, Office, Role, Team, User, WorkDay } from "./types";
 
 type UserRow = {
@@ -146,9 +146,9 @@ function mapAttendance(row: AttendanceRow): Attendance {
     employeeId: row.employee_id,
     officeId: row.office_id,
     date: row.date,
-    checkInAt: timestamp(row.check_in_at) ?? "",
+    checkInAt: timestamp(row.check_in_at),
     checkOutAt: timestamp(row.check_out_at),
-    checkInDistanceMeters: Number(row.check_in_distance_meters),
+    checkInDistanceMeters: row.check_in_distance_meters == null ? null : Number(row.check_in_distance_meters),
     checkOutDistanceMeters: row.check_out_distance_meters == null ? null : Number(row.check_out_distance_meters),
     status: row.status,
   };
@@ -226,7 +226,70 @@ export function teamName(teams: Team[], teamId: string | null) {
 
 export const getDirectory = cache(() => loadDirectory());
 
-export const getMonthAttendance = cache((month: string) => loadMonth(month));
+async function ensureAbsences(month: string) {
+  const directory = await getDirectory();
+  const office = directory.office;
+  const today = officeDate(office.timezone);
+  const nowMinutes = officeMinutes(office.timezone, new Date());
+  const closedDays = daysOfMonth(month).filter((date) => dayIsClosed(date, today, nowMinutes, office.workDays, office.holidays));
+  if (closedDays.length === 0) return false;
+
+  const active = directory.employees.filter((employee) => employee.active);
+  if (active.length === 0) return false;
+
+  const existing = await queryMonth(month);
+  const present = new Set(existing.map((record) => `${record.employeeId}\0${record.date}`));
+  const inserts: Attendance[] = [];
+
+  for (const employee of active) {
+    for (const date of closedDays) {
+      const key = `${employee.id}\0${date}`;
+      if (present.has(key)) continue;
+      inserts.push({
+        id: crypto.randomUUID(),
+        employeeId: employee.id,
+        officeId: office.id,
+        date,
+        checkInAt: null,
+        checkOutAt: null,
+        checkInDistanceMeters: null,
+        checkOutDistanceMeters: null,
+        status: "ABSENT",
+      });
+    }
+  }
+
+  if (inserts.length === 0) return false;
+
+  await ensure();
+  const sql = db();
+  await sql.transaction(
+    inserts.map(
+      (record) => sql`
+        INSERT INTO attendance (
+          id, employee_id, office_id, date, check_in_at, check_out_at,
+          check_in_distance_meters, check_out_distance_meters, status
+        )
+        VALUES (
+          ${record.id}, ${record.employeeId}, ${record.officeId}, ${record.date}, NULL, NULL,
+          NULL, NULL, 'ABSENT'
+        )
+        ON CONFLICT (employee_id, date) DO NOTHING
+      `,
+    ),
+    {},
+  );
+  return true;
+}
+
+export const getMonthAttendance = cache(async (month: string) => {
+  const wrote = await ensureAbsences(month);
+  if (wrote) {
+    expire("attendance");
+    return queryMonth(month);
+  }
+  return loadMonth(month);
+});
 
 export async function findUserByEmail(email: string) {
   await ensure();
@@ -338,7 +401,13 @@ export async function markCheckIn(input: { employeeId: string; distanceMeters: n
       ${crypto.randomUUID()}, ${input.employeeId}, ${office.id}, ${date}, ${now.toISOString()}, NULL,
       ${Math.round(input.distanceMeters)}, NULL, ${status}
     )
-    ON CONFLICT (employee_id, date) DO NOTHING
+    ON CONFLICT (employee_id, date) DO UPDATE
+    SET check_in_at = EXCLUDED.check_in_at,
+        check_out_at = NULL,
+        check_in_distance_meters = EXCLUDED.check_in_distance_meters,
+        check_out_distance_meters = NULL,
+        status = EXCLUDED.status
+    WHERE attendance.status = 'ABSENT'
     RETURNING id, employee_id, office_id, date, check_in_at, check_out_at, check_in_distance_meters, check_out_distance_meters, status
   `) as AttendanceRow[];
   const record = rows[0];
@@ -352,8 +421,11 @@ export async function markCheckOut(input: { employeeId: string; distanceMeters: 
   const sql = db();
 
   const date = officeDate(office.timezone);
-  const existing = (await sql`SELECT check_out_at FROM attendance WHERE employee_id = ${input.employeeId} AND date = ${date}`) as Array<{ check_out_at: Date | string | null }>;
-  if (!existing[0]) return { ok: false as const, reason: "not-in" as const };
+  const existing = (await sql`SELECT status, check_out_at FROM attendance WHERE employee_id = ${input.employeeId} AND date = ${date}`) as Array<{
+    status: AttendanceStatus;
+    check_out_at: Date | string | null;
+  }>;
+  if (!existing[0] || existing[0].status === "ABSENT") return { ok: false as const, reason: "not-in" as const };
   if (existing[0].check_out_at) return { ok: false as const, reason: "already-out" as const };
 
   const rows = (await sql`
@@ -372,6 +444,47 @@ export async function markCheckOut(input: { employeeId: string; distanceMeters: 
 export async function findEmployeeById(id: string) {
   const directory = await getDirectory();
   return directory.employees.find((employee) => employee.id === id) ?? null;
+}
+
+export async function findEmployeeAuth(id: string) {
+  await ensure();
+  const rows = (await db()`
+    SELECT id, active, pin_hash, device_token_hash
+    FROM employees
+    WHERE id = ${id}
+    LIMIT 1
+  `) as Array<{ id: string; active: boolean; pin_hash: string | null; device_token_hash: string | null }>;
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    active: row.active,
+    pinHash: row.pin_hash,
+    deviceTokenHash: row.device_token_hash,
+  };
+}
+
+export async function employeeHasDevice(id: string) {
+  const auth = await findEmployeeAuth(id);
+  return Boolean(auth?.deviceTokenHash);
+}
+
+export async function bindEmployeeDevice(employeeId: string, deviceToken: string) {
+  await ensure();
+  await db()`UPDATE employees SET device_token_hash = ${hashPassword(deviceToken)} WHERE id = ${employeeId} AND device_token_hash IS NULL`;
+}
+
+export async function clearEmployeeDevice(employeeId: string) {
+  await ensure();
+  const rows = await db()`UPDATE employees SET device_token_hash = NULL WHERE id = ${employeeId} RETURNING id`;
+  if (rows.length === 0) return { ok: false as const, reason: "missing" as const };
+  return { ok: true as const };
+}
+
+export function deviceMatches(deviceToken: string, storedHash: string | null) {
+  if (!storedHash) return false;
+  if (!deviceToken || deviceToken.length < 32) return false;
+  return verifyPassword(deviceToken, storedHash);
 }
 
 export async function attendanceInMonth(employeeId: string, month: string) {
@@ -411,10 +524,10 @@ export async function createEmployee(input: {
   const employeeId = crypto.randomUUID();
   try {
     await sql`
-      INSERT INTO employees (id, code, first_name, last_name, email, team_id, office_id, active, pin_hash, session_token)
+      INSERT INTO employees (id, code, first_name, last_name, email, team_id, office_id, active, pin_hash, session_token, device_token_hash)
       VALUES (
         ${employeeId}, ${code}, ${input.firstName.trim()}, ${input.lastName.trim()}, ${email},
-        ${input.teamId}, ${office.id}, true, ${hashPassword(input.pin)}, NULL
+        ${input.teamId}, ${office.id}, true, ${hashPassword(input.pin)}, NULL, NULL
       )
     `;
   } catch (error) {

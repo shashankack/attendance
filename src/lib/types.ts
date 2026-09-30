@@ -53,16 +53,16 @@ export type Office = {
   holidays: Holiday[];
 };
 
-export type AttendanceStatus = "PRESENT" | "LATE";
+export type AttendanceStatus = "PRESENT" | "LATE" | "ABSENT";
 
 export type Attendance = {
   id: string;
   employeeId: string;
   officeId: string;
   date: string;
-  checkInAt: string;
+  checkInAt: string | null;
   checkOutAt: string | null;
-  checkInDistanceMeters: number;
+  checkInDistanceMeters: number | null;
   checkOutDistanceMeters: number | null;
   status: AttendanceStatus;
 };

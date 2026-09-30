@@ -28,13 +28,16 @@ export default async function MyAttendancePage({
   return (
     <Shell name={`${employee.firstName} ${employee.lastName}`} role="EMPLOYEE" day={formatLongDay(directory.office.timezone)}>
       <h1 className="font-serif text-4xl tracking-tight">Your attendance</h1>
-      <p className="mt-2 text-muted-foreground">Mark arrival once, then log your leaving time on the same button. Switching devices only ends the session.</p>
+      <p className="mt-2 text-muted-foreground">
+        Mark arrival once, then log your leaving time on the same button. Sign-in and marking only work from the phone linked to your account.
+      </p>
       <div className="mt-6 max-w-xl">
         <CheckInPanel
+          employeeId={employee.id}
           firstName={employee.firstName}
-          checkedIn={Boolean(record)}
+          checkedIn={Boolean(record && record.status !== "ABSENT")}
           checkedOut={Boolean(record?.checkOutAt)}
-          checkInLabel={record ? formatClock(record.checkInAt, directory.office.timezone) : null}
+          checkInLabel={record?.checkInAt ? formatClock(record.checkInAt, directory.office.timezone) : null}
           checkOutLabel={record?.checkOutAt ? formatClock(record.checkOutAt, directory.office.timezone) : null}
           status={record?.status ?? null}
           officeName={directory.office.name}
@@ -46,7 +49,7 @@ export default async function MyAttendancePage({
       </div>
       <div className="mt-10 flex flex-wrap items-center justify-between gap-3">
         <MonthNav month={month} hrefFor={(value) => `/me?month=${value}`} />
-        <p className="text-sm text-muted-foreground">P is on time, L is late, and a dash is a working day with no check-in. Days off and holidays are blank.</p>
+        <p className="text-sm text-muted-foreground">P is on time, L is late, and A is absent. Days off and holidays are blank.</p>
       </div>
       <div className="mt-4">
         <MonthCalendar month={month} today={today} timeZone={directory.office.timezone} records={records} workDays={directory.office.workDays} holidays={directory.office.holidays} />

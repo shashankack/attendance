@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { editEmployee } from "@/lib/actions";
+import { clearLinkedDevice, editEmployee } from "@/lib/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,7 @@ export function EmployeeEditor({
   teamId,
   active,
   hasPin,
+  hasDevice,
   teams,
 }: {
   employeeId: string;
@@ -30,11 +31,14 @@ export function EmployeeEditor({
   teamId: string | null;
   active: boolean;
   hasPin: boolean;
+  hasDevice: boolean;
   teams: Array<{ id: string; name: string }>;
 }) {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [linked, setLinked] = useState(hasDevice);
   const stored = {
     firstName,
     lastName,
@@ -67,10 +71,25 @@ export function EmployeeEditor({
     };
     setDraft(next);
     setSaved(next);
-  }, [employeeId, firstName, lastName, email, code, teamId, active]);
+    setLinked(hasDevice);
+  }, [employeeId, firstName, lastName, email, code, teamId, active, hasDevice]);
 
   function update(patch: Partial<typeof draft>) {
     setDraft((current) => ({ ...current, ...patch }));
+  }
+
+  async function clearDevice() {
+    if (linked && !window.confirm("Clear the linked phone? The next successful PIN sign-in on any phone will link that phone instead.")) {
+      return;
+    }
+    setClearing(true);
+    const result = await clearLinkedDevice(employeeId);
+    setClearing(false);
+    setMessage(result.ok ? "Linked phone cleared. The next sign-in will link a new phone." : result.message);
+    if (result.ok) {
+      setLinked(false);
+      router.refresh();
+    }
   }
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -160,6 +179,19 @@ export function EmployeeEditor({
               placeholder={hasPin ? "Leave blank to keep the current PIN" : "4 to 8 digits"}
               className="bg-card"
             />
+          </div>
+          <div className="grid gap-2 sm:col-span-2">
+            <Label>Linked phone</Label>
+            <p className="text-sm text-muted-foreground">
+              {linked
+                ? "A phone is linked. Sign-in and marking only work from that phone. Clear it if they wiped the browser or got a new phone."
+                : "No phone is linked yet. The next PIN sign-in links that phone."}
+            </p>
+            <div>
+              <Button type="button" variant="outline" disabled={!linked || clearing} onClick={() => void clearDevice()}>
+                {clearing ? "Clearing…" : "Clear linked phone"}
+              </Button>
+            </div>
           </div>
           {teams.length > 0 ? (
             <div className="grid gap-2 sm:col-span-2">

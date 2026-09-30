@@ -9,7 +9,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { currentUser } from "@/lib/actions";
-import { attendanceInMonth, findEmployeeById, getDirectory, teamName } from "@/lib/store";
+import { attendanceInMonth, employeeHasDevice, findEmployeeById, getDirectory, teamName } from "@/lib/store";
 import { formatLongDay, officeDate, parseMonth } from "@/lib/time";
 
 export default async function EmployeeDetailPage({
@@ -34,8 +34,10 @@ export default async function EmployeeDetailPage({
   const month = parseMonth(query.month, office.timezone);
   const today = officeDate(office.timezone);
   const records = await attendanceInMonth(employee.id, month);
+  const hasDevice = await employeeHasDevice(employee.id);
   const present = records.filter((record) => record.status === "PRESENT").length;
   const late = records.filter((record) => record.status === "LATE").length;
+  const absent = records.filter((record) => record.status === "ABSENT").length;
 
   return (
     <Shell name={user.name} role={user.role} day={formatLongDay(office.timezone)} showTeams={showTeams}>
@@ -62,7 +64,7 @@ export default async function EmployeeDetailPage({
         {[
           { label: "On time", value: present },
           { label: "Late", value: late },
-          { label: "Marked days", value: records.length },
+          { label: "Absent", value: absent },
         ].map((stat) => (
           <Card key={stat.label} size="sm">
             <CardHeader>
@@ -74,7 +76,7 @@ export default async function EmployeeDetailPage({
       </div>
       <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
         <MonthNav month={month} hrefFor={(value) => `/admin/employees/${id}?month=${value}`} />
-        <p className="text-sm text-muted-foreground">P is on time, L is late, and a dash is a working day with no check-in. Days off and holidays are blank.</p>
+        <p className="text-sm text-muted-foreground">P is on time, L is late, and A is absent. Days off and holidays are blank.</p>
       </div>
       <div className="mt-4">
         <MonthCalendar month={month} today={today} timeZone={office.timezone} records={records} workDays={office.workDays} holidays={office.holidays} />
@@ -89,6 +91,7 @@ export default async function EmployeeDetailPage({
           teamId={employee.teamId}
           active={employee.active}
           hasPin={Boolean(employee.pinHash)}
+          hasDevice={hasDevice}
           teams={directory.teams}
         />
       </div>

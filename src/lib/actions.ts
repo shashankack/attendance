@@ -7,9 +7,13 @@ import { cache } from "react";
 import { distanceMeters } from "./geo";
 import { readSession, signSession } from "./session";
 import {
+  bindEmployeeDevice,
+  clearEmployeeDevice,
   createEmployee,
   createTeam,
   deleteTeam,
+  deviceMatches,
+  findEmployeeAuth,
   findEmployeeById,
   findUserByEmail,
   endSession,
@@ -99,11 +103,26 @@ export async function sessionAlive() {
   return true;
 }
 
-export async function signInEmployee(employeeId: string, pin: string): Promise<ActionResult> {
-  const employee = await findEmployeeById(employeeId);
+const DEVICE_MESSAGE = "Use the phone linked to this account, or ask an admin to clear the device.";
+
+export async function signInEmployee(employeeId: string, pin: string, deviceToken: string): Promise<ActionResult> {
+  const employee = await findEmployeeAuth(employeeId);
   if (!employee || !employee.active) return { ok: false, message: "That person cannot sign in." };
   if (!employee.pinHash) return { ok: false, message: "Ask an admin to set your sign-in PIN." };
   if (!verifyPassword(pin, employee.pinHash)) return { ok: false, message: "That PIN does not match." };
+
+  const secret = deviceToken.trim();
+  if (secret.length < 32) return { ok: false, message: DEVICE_MESSAGE };
+
+  if (!employee.deviceTokenHash) {
+    await bindEmployeeDevice(employee.id, secret);
+    const bound = await findEmployeeAuth(employee.id);
+    if (!deviceMatches(secret, bound?.deviceTokenHash ?? null)) {
+      return { ok: false, message: DEVICE_MESSAGE };
+    }
+  } else if (!deviceMatches(secret, employee.deviceTokenHash)) {
+    return { ok: false, message: DEVICE_MESSAGE };
+  }
 
   const jar = await cookies();
   const sid = await replaceSession({ id: employee.id, role: "EMPLOYEE" });
@@ -115,6 +134,13 @@ export async function signInEmployee(employeeId: string, pin: string): Promise<A
   });
 
   redirect("/me");
+}
+
+async function requireEmployeeDevice(employeeId: string, deviceToken: string) {
+  const auth = await findEmployeeAuth(employeeId);
+  if (!auth?.deviceTokenHash) return DEVICE_MESSAGE;
+  if (!deviceMatches(deviceToken.trim(), auth.deviceTokenHash)) return DEVICE_MESSAGE;
+  return null;
 }
 
 export async function logout() {
@@ -187,9 +213,12 @@ export async function checkIn(input: {
   latitude: number;
   longitude: number;
   accuracy: number;
+  deviceToken: string;
 }): Promise<ActionResult> {
   const employee = await currentEmployee({ live: true });
   if (!employee) return { ok: false, message: "Sign in before marking attendance." };
+  const deviceBlocked = await requireEmployeeDevice(employee.id, input.deviceToken);
+  if (deviceBlocked) return { ok: false, message: deviceBlocked };
   const office = await getOffice();
 
   if (!Number.isFinite(input.latitude) || !Number.isFinite(input.longitude)) {
@@ -220,9 +249,12 @@ export async function checkOut(input: {
   latitude: number;
   longitude: number;
   accuracy: number;
+  deviceToken: string;
 }): Promise<ActionResult> {
   const employee = await currentEmployee({ live: true });
   if (!employee) return { ok: false, message: "Sign in before marking attendance." };
+  const deviceBlocked = await requireEmployeeDevice(employee.id, input.deviceToken);
+  if (deviceBlocked) return { ok: false, message: deviceBlocked };
   const office = await getOffice();
 
   if (!Number.isFinite(input.latitude) || !Number.isFinite(input.longitude)) {
@@ -377,6 +409,13 @@ export async function editEmployee(input: {
 
   const result = await updateEmployee({ ...input, pin: pin || null });
   if (!result.ok) return { ok: false, message: employeeMessage(result.reason) };
+  return { ok: true };
+}
+
+export async function clearLinkedDevice(employeeId: string): Promise<ActionResult> {
+  if (!(await requireAdmin())) return { ok: false, message: "Only an admin can clear a linked device." };
+  const result = await clearEmployeeDevice(employeeId);
+  if (!result.ok) return { ok: false, message: "That employee no longer exists." };
   return { ok: true };
 }
 

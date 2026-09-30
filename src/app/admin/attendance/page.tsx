@@ -32,7 +32,11 @@ export default async function MonthlyAttendancePage({
   const rows = employees.map((employee) => {
     const records = attendance.filter((record) => record.employeeId === employee.id);
     const byDate = new Map(records.map((record) => [record.date, record]));
-    const absent = days.filter((date) => date <= today && isExpected(date, directory.office.workDays, directory.office.holidays) && !byDate.has(date)).length;
+    const absent = days.filter((date) => {
+      if (date > today || !isExpected(date, directory.office.workDays, directory.office.holidays)) return false;
+      const record = byDate.get(date);
+      return !record || record.status === "ABSENT";
+    }).length;
     return {
       employee,
       byDate,
@@ -44,7 +48,7 @@ export default async function MonthlyAttendancePage({
 
   return (
     <Shell name={user.name} role={user.role} day={formatLongDay(directory.office.timezone)} showTeams={directory.teams.length > 0}>
-      <PageHeader title="Month" description="P is on time, L is late, and a dash is a working day with no check-in. Days off and holidays are left blank." />
+      <PageHeader title="Month" description="P is on time, L is late, and A is absent. Days off and holidays are left blank." />
       <div className="mt-6">
         <MonthNav month={month} hrefFor={(value) => `/admin/attendance?month=${value}`} />
       </div>
@@ -102,13 +106,26 @@ export default async function MonthlyAttendancePage({
                 {days.map((date) => {
                   const record = row.byDate.get(date);
                   const off = !isExpected(date, directory.office.workDays, directory.office.holidays);
-                  const label = date > today ? "" : record ? (record.status === "LATE" ? "L" : "P") : off ? "" : "–";
+                  const label =
+                    date > today
+                      ? ""
+                      : record?.status === "LATE"
+                        ? "L"
+                        : record?.status === "PRESENT"
+                          ? "P"
+                          : record?.status === "ABSENT"
+                            ? "A"
+                            : off
+                              ? ""
+                              : "–";
                   const chip =
                     label === "L"
                       ? "bg-destructive/10 text-destructive"
                       : label === "P"
                         ? "bg-primary/15 text-primary"
-                        : "text-muted-foreground";
+                        : label === "A"
+                          ? "bg-muted text-muted-foreground"
+                          : "text-muted-foreground";
                   return (
                     <td key={date} className="px-1 py-2">
                       {label ? (

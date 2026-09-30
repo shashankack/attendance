@@ -29,7 +29,7 @@ That signs the admin out of every device.
 
 Open http://localhost:3000
 
-The front page lists the office. A person opens their name, signs in with the PIN an admin set, then checks in or out and logs off. Admin sign-in is at http://localhost:3000/login.
+The front page lists the office. A person opens their name, signs in with the PIN an admin set, then checks in or out and logs off. The first successful sign-in links that phone to the account. After that, only that phone can sign in or mark attendance. If they clear site data or change phones, an admin opens their profile and chooses **Clear linked phone**. Admin sign-in is at http://localhost:3000/login.
 
 When there are no teams, team names stay off the desk, people list, and attendance screens. The Teams page is still there if an admin opens it to add one.
 

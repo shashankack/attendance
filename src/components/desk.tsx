@@ -20,7 +20,7 @@ export type DeskPerson = {
   teamName: string | null;
   checkedIn: boolean;
   checkedOut: boolean;
-  status: "PRESENT" | "LATE" | null;
+  status: "PRESENT" | "LATE" | "ABSENT" | null;
 };
 
 function initials(firstName: string, lastName: string) {
@@ -28,6 +28,7 @@ function initials(firstName: string, lastName: string) {
 }
 
 function presence(person: DeskPerson) {
+  if (person.status === "ABSENT") return { label: "Absent", tone: "absent" as const };
   if (!person.checkedIn) return { label: "Not in", tone: "absent" as const };
   if (person.checkedOut) return { label: "Left", tone: "left" as const };
   if (person.status === "LATE") return { label: "Late", tone: "late" as const };

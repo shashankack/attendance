@@ -21,7 +21,7 @@ export default async function HomePage() {
         lastName: employee.lastName,
         code: employee.code,
         teamName: showTeams ? teamName(directory.teams, employee.teamId) : null,
-        checkedIn: Boolean(record),
+        checkedIn: Boolean(record && record.status !== "ABSENT"),
         checkedOut: Boolean(record?.checkOutAt),
         status: record?.status ?? null,
       };
