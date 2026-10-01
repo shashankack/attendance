@@ -11,6 +11,28 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 
+function locationFailureMessage(error: GeolocationPositionError) {
+  if (typeof window !== "undefined" && !window.isSecureContext) {
+    return "Location needs a secure page (https). Open the site from its https address, not a raw http LAN link.";
+  }
+  if (error.code === error.PERMISSION_DENIED) {
+    return "Allow location access for this site, then try again.";
+  }
+  if (error.code === error.TIMEOUT) {
+    return "The GPS fix timed out. Step nearer a window or open space, then try again.";
+  }
+  if (error.code === error.POSITION_UNAVAILABLE) {
+    return "This phone could not get a GPS fix. Turn on location services, then try again.";
+  }
+  return "A location reading could not be taken. Try again in a moment.";
+}
+
+function readPosition(options: PositionOptions) {
+  return new Promise<GeolocationPosition>((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+  });
+}
+
 export function CheckInPanel({
   employeeId,
   firstName,
@@ -48,6 +70,10 @@ export function CheckInPanel({
       setMessage("This browser cannot read a location.");
       return;
     }
+    if (typeof window !== "undefined" && !window.isSecureContext) {
+      setMessage("Location needs a secure page (https). Open the site from its https address, not a raw http LAN link.");
+      return;
+    }
 
     setPending(kind);
     setMessage("Finding your location…");
@@ -61,45 +87,56 @@ export function CheckInPanel({
       }
     }
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const coords = position.coords;
-        if (coords.accuracy > radius) {
-          setPending(null);
-          setMessage(
-            `This GPS reading is only accurate to about ${Math.round(coords.accuracy)} m. Marking needs a fix sharper than ${radius} m. Try again.`,
-          );
-          return;
-        }
-
-        const distance = distanceMeters(coords.latitude, coords.longitude, latitude, longitude);
-        if (distance > radius) {
-          setPending(null);
-          setMessage(`You are ${Math.round(distance)} m from the office. Marking is available within ${radius} m.`);
-          return;
-        }
-
-        const payload = {
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          accuracy: coords.accuracy,
-          deviceToken: readDeviceSecret(employeeId),
-        };
-        const result = kind === "in" ? await checkIn(payload) : await checkOut(payload);
+    let position: GeolocationPosition;
+    try {
+      position = await readPosition({ enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+    } catch (firstError) {
+      const error = firstError as GeolocationPositionError;
+      if (error.code === error.PERMISSION_DENIED) {
         setPending(null);
-        if (!result.ok) {
-          setMessage(result.message);
-          return;
-        }
-        setMessage(null);
-        router.refresh();
-      },
-      () => {
+        setMessage(locationFailureMessage(error));
+        return;
+      }
+      try {
+        setMessage("Retrying with a broader GPS reading…");
+        position = await readPosition({ enableHighAccuracy: false, timeout: 20000, maximumAge: 60000 });
+      } catch (secondError) {
         setPending(null);
-        setMessage("Allow location access. Attendance is only marked from your real position.");
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
-    );
+        setMessage(locationFailureMessage(secondError as GeolocationPositionError));
+        return;
+      }
+    }
+
+    const coords = position.coords;
+    if (coords.accuracy > radius) {
+      setPending(null);
+      setMessage(
+        `This GPS reading is only accurate to about ${Math.round(coords.accuracy)} m. Marking needs a fix sharper than ${radius} m. Try again nearer a window.`,
+      );
+      return;
+    }
+
+    const distance = distanceMeters(coords.latitude, coords.longitude, latitude, longitude);
+    if (distance > radius) {
+      setPending(null);
+      setMessage(`You are ${Math.round(distance)} m from the office. Marking is available within ${radius} m.`);
+      return;
+    }
+
+    const payload = {
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      accuracy: coords.accuracy,
+      deviceToken: readDeviceSecret(employeeId),
+    };
+    const result = kind === "in" ? await checkIn(payload) : await checkOut(payload);
+    setPending(null);
+    if (!result.ok) {
+      setMessage(result.message);
+      return;
+    }
+    setMessage(null);
+    router.refresh();
   }
 
   const phase = checkedOut ? "done" : checkedIn ? "leave" : "arrive";
