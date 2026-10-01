@@ -34,6 +34,16 @@ import type { Holiday, PublicUser, WorkDay } from "./types";
 
 export type ActionResult = { ok: true } | { ok: false; message: string };
 
+function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: 60 * 60 * 24 * 7,
+    secure: process.env.NODE_ENV === "production",
+  };
+}
+
 function publicUser(user: { id: string; email: string; name: string; role: PublicUser["role"] }): PublicUser {
   return { id: user.id, email: user.email, name: user.name, role: user.role };
 }
@@ -83,12 +93,7 @@ export async function login(formData: FormData): Promise<ActionResult> {
 
   const jar = await cookies();
   const sid = await replaceSession({ id: user.id, role: "ADMIN" });
-  jar.set("session", signSession({ id: user.id, role: "ADMIN", sid }), {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7,
-  });
+  jar.set("session", signSession({ id: user.id, role: "ADMIN", sid }), sessionCookieOptions());
 
   redirect("/admin");
 }
@@ -126,12 +131,7 @@ export async function signInEmployee(employeeId: string, pin: string, deviceToke
 
   const jar = await cookies();
   const sid = await replaceSession({ id: employee.id, role: "EMPLOYEE" });
-  jar.set("session", signSession({ id: employee.id, role: "EMPLOYEE", sid }), {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7,
-  });
+  jar.set("session", signSession({ id: employee.id, role: "EMPLOYEE", sid }), sessionCookieOptions());
 
   redirect("/me");
 }

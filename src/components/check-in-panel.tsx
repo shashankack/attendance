@@ -16,13 +16,13 @@ function locationFailureMessage(error: GeolocationPositionError) {
     return "Location needs a secure page (https). Open the site from its https address, not a raw http LAN link.";
   }
   if (error.code === error.PERMISSION_DENIED) {
-    return "Allow location access for this site, then try again.";
+    return "Allow location access for this site in Safari Settings, then try again.";
   }
   if (error.code === error.TIMEOUT) {
     return "The GPS fix timed out. Step nearer a window or open space, then try again.";
   }
   if (error.code === error.POSITION_UNAVAILABLE) {
-    return "This phone could not get a GPS fix. Turn on location services, then try again.";
+    return "This phone could not get a GPS fix. Turn on Location Services, then try again.";
   }
   return "A location reading could not be taken. Try again in a moment.";
 }
@@ -64,7 +64,7 @@ export function CheckInPanel({
   const [pending, setPending] = useState<"in" | "out" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  async function locate(kind: "in" | "out") {
+  function locate(kind: "in" | "out") {
     if (pending) return;
     if (!navigator.geolocation) {
       setMessage("This browser cannot read a location.");
@@ -78,65 +78,71 @@ export function CheckInPanel({
     setPending(kind);
     setMessage("Finding your location…");
 
-    if (requireNetwork) {
-      const onWifi = await onOfficeWifi();
-      if (!onWifi) {
-        setPending(null);
-        setMessage("Connect to the office Wi-Fi. Marking stays unavailable on other networks.");
-        return;
-      }
-    }
+    // iOS Safari only allows GPS when getCurrentPosition starts in the same tap.
+    // Do not await anything before this call.
+    const firstFix = readPosition({ enableHighAccuracy: true, timeout: 25000, maximumAge: 0 });
 
-    let position: GeolocationPosition;
-    try {
-      position = await readPosition({ enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
-    } catch (firstError) {
-      const error = firstError as GeolocationPositionError;
-      if (error.code === error.PERMISSION_DENIED) {
-        setPending(null);
-        setMessage(locationFailureMessage(error));
-        return;
-      }
+    void (async () => {
+      let position: GeolocationPosition;
       try {
-        setMessage("Retrying with a broader GPS reading…");
-        position = await readPosition({ enableHighAccuracy: false, timeout: 20000, maximumAge: 60000 });
-      } catch (secondError) {
+        position = await firstFix;
+      } catch (firstError) {
+        const error = firstError as GeolocationPositionError;
+        if (error.code === error.PERMISSION_DENIED) {
+          setPending(null);
+          setMessage(locationFailureMessage(error));
+          return;
+        }
+        try {
+          setMessage("Retrying with a broader GPS reading…");
+          position = await readPosition({ enableHighAccuracy: false, timeout: 25000, maximumAge: 60000 });
+        } catch (secondError) {
+          setPending(null);
+          setMessage(locationFailureMessage(secondError as GeolocationPositionError));
+          return;
+        }
+      }
+
+      if (requireNetwork) {
+        const onWifi = await onOfficeWifi();
+        if (!onWifi) {
+          setPending(null);
+          setMessage("Connect to the office Wi-Fi. Marking stays unavailable on other networks.");
+          return;
+        }
+      }
+
+      const coords = position.coords;
+      if (coords.accuracy > radius) {
         setPending(null);
-        setMessage(locationFailureMessage(secondError as GeolocationPositionError));
+        setMessage(
+          `This GPS reading is only accurate to about ${Math.round(coords.accuracy)} m. Marking needs a fix sharper than ${radius} m. Try again nearer a window.`,
+        );
         return;
       }
-    }
 
-    const coords = position.coords;
-    if (coords.accuracy > radius) {
+      const distance = distanceMeters(coords.latitude, coords.longitude, latitude, longitude);
+      if (distance > radius) {
+        setPending(null);
+        setMessage(`You are ${Math.round(distance)} m from the office. Marking is available within ${radius} m.`);
+        return;
+      }
+
+      const payload = {
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        accuracy: coords.accuracy,
+        deviceToken: readDeviceSecret(employeeId),
+      };
+      const result = kind === "in" ? await checkIn(payload) : await checkOut(payload);
       setPending(null);
-      setMessage(
-        `This GPS reading is only accurate to about ${Math.round(coords.accuracy)} m. Marking needs a fix sharper than ${radius} m. Try again nearer a window.`,
-      );
-      return;
-    }
-
-    const distance = distanceMeters(coords.latitude, coords.longitude, latitude, longitude);
-    if (distance > radius) {
-      setPending(null);
-      setMessage(`You are ${Math.round(distance)} m from the office. Marking is available within ${radius} m.`);
-      return;
-    }
-
-    const payload = {
-      latitude: coords.latitude,
-      longitude: coords.longitude,
-      accuracy: coords.accuracy,
-      deviceToken: readDeviceSecret(employeeId),
-    };
-    const result = kind === "in" ? await checkIn(payload) : await checkOut(payload);
-    setPending(null);
-    if (!result.ok) {
-      setMessage(result.message);
-      return;
-    }
-    setMessage(null);
-    router.refresh();
+      if (!result.ok) {
+        setMessage(result.message);
+        return;
+      }
+      setMessage(null);
+      router.refresh();
+    })();
   }
 
   const phase = checkedOut ? "done" : checkedIn ? "leave" : "arrive";
@@ -168,7 +174,7 @@ export function CheckInPanel({
           type="button"
           size="lg"
           disabled={phase === "done" || pending !== null}
-          onClick={() => void locate(phase === "leave" ? "out" : "in")}
+          onClick={() => locate(phase === "leave" ? "out" : "in")}
           className="h-12 text-base"
         >
           {pending !== null ? "Checking location…" : phase === "done" ? "Marked today" : phase === "leave" ? "Log leaving time" : "Mark attendance"}
