@@ -6,32 +6,11 @@ import { MapPin } from "lucide-react";
 
 import { checkIn, checkOut, onOfficeWifi } from "@/lib/actions";
 import { readDeviceSecret } from "@/lib/device";
+import { locationFailureMessage, startLocationReading } from "@/lib/geolocation";
 import { distanceMeters } from "@/lib/geo";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-
-function locationFailureMessage(error: GeolocationPositionError) {
-  if (typeof window !== "undefined" && !window.isSecureContext) {
-    return "Location needs a secure page (https). Open the site from its https address, not a raw http LAN link.";
-  }
-  if (error.code === error.PERMISSION_DENIED) {
-    return "Allow location access for this site in Safari Settings, then try again.";
-  }
-  if (error.code === error.TIMEOUT) {
-    return "The GPS fix timed out. Step nearer a window or open space, then try again.";
-  }
-  if (error.code === error.POSITION_UNAVAILABLE) {
-    return "This phone could not get a GPS fix. Turn on Location Services, then try again.";
-  }
-  return "A location reading could not be taken. Try again in a moment.";
-}
-
-function readPosition(options: PositionOptions) {
-  return new Promise<GeolocationPosition>((resolve, reject) => {
-    navigator.geolocation.getCurrentPosition(resolve, reject, options);
-  });
-}
 
 export function CheckInPanel({
   employeeId,
@@ -71,36 +50,26 @@ export function CheckInPanel({
       return;
     }
     if (typeof window !== "undefined" && !window.isSecureContext) {
-      setMessage("Location needs a secure page (https). Open the site from its https address, not a raw http LAN link.");
+      setMessage("Location needs a secure page (https). Open the site from its https address.");
       return;
     }
 
     setPending(kind);
     setMessage("Finding your location…");
 
-    // iOS Safari only allows GPS when getCurrentPosition starts in the same tap.
-    // Do not await anything before this call.
-    const firstFix = readPosition({ enableHighAccuracy: true, timeout: 25000, maximumAge: 0 });
+    // Must start in the same tap turn on iOS Safari — no await before this.
+    const reading = startLocationReading();
 
     void (async () => {
       let position: GeolocationPosition;
       try {
-        position = await firstFix;
-      } catch (firstError) {
-        const error = firstError as GeolocationPositionError;
-        if (error.code === error.PERMISSION_DENIED) {
-          setPending(null);
-          setMessage(locationFailureMessage(error));
-          return;
-        }
-        try {
-          setMessage("Retrying with a broader GPS reading…");
-          position = await readPosition({ enableHighAccuracy: false, timeout: 25000, maximumAge: 60000 });
-        } catch (secondError) {
-          setPending(null);
-          setMessage(locationFailureMessage(secondError as GeolocationPositionError));
-          return;
-        }
+        position = await reading;
+      } catch (error) {
+        setPending(null);
+        const failed = error as { code?: number; errors?: Array<{ code?: number }> };
+        const first = failed.errors?.[0] ?? failed;
+        setMessage(locationFailureMessage(first));
+        return;
       }
 
       if (requireNetwork) {
