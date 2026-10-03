@@ -3,8 +3,16 @@ import { cache } from "react";
 
 import { neon, NeonDbError } from "@neondatabase/serverless";
 import { revalidateTag, unstable_cache } from "next/cache";
+import { after } from "next/server";
 
-import { arrivalStatus, dayIsClosed, isExpected } from "./schedule";
+import {
+  arrivalStatus,
+  dayIsClosed,
+  holidayMonthDay,
+  holidayOn,
+  isExpected,
+  isSecondOrFourthSaturday,
+} from "./schedule";
 import { prepareDatabase } from "./schema.mjs";
 import { daysOfMonth, officeDate, officeMinutes } from "./time";
 import type { Attendance, AttendanceStatus, Employee, Holiday, Office, Role, Team, User, WorkDay } from "./types";
@@ -29,6 +37,7 @@ type OfficeRow = {
   timezone: string;
   public_ip: string;
   require_office_network: boolean;
+  second_fourth_saturday_off: boolean;
 };
 
 type EmployeeRow = {
@@ -122,6 +131,7 @@ function mapOffice(row: OfficeRow): Omit<Office, "workDays" | "holidays"> {
     timezone: row.timezone,
     publicIp: row.public_ip,
     requireOfficeNetwork: row.require_office_network,
+    secondFourthSaturdayOff: Boolean(row.second_fourth_saturday_off),
   };
 }
 
@@ -162,15 +172,22 @@ function expire(tag: string) {
   revalidateTag(tag, { expire: 0 });
 }
 
+/** Safe during RSC render / cached reads — revalidation runs after the response. */
+function expireAfter(tag: string) {
+  after(() => {
+    revalidateTag(tag, { expire: 0 });
+  });
+}
+
 async function queryDirectory() {
   await ensure();
   const sql = db();
   const [teams, employees, offices, workDays, holidays] = await Promise.all([
     sql`SELECT id, name FROM teams ORDER BY name`,
     sql`SELECT id, code, first_name, last_name, email, team_id, office_id, active, pin_hash FROM employees ORDER BY first_name, last_name`,
-    sql`SELECT id, name, latitude, longitude, allowed_radius_meters, timezone, public_ip, require_office_network FROM office LIMIT 1`,
+    sql`SELECT id, name, latitude, longitude, allowed_radius_meters, timezone, public_ip, require_office_network, second_fourth_saturday_off FROM office LIMIT 1`,
     sql`SELECT weekday, working, start_minutes, end_minutes FROM work_days ORDER BY weekday`,
-    sql`SELECT id, date, name FROM holidays ORDER BY date`,
+    sql`SELECT id, date, name, yearly FROM holidays ORDER BY date`,
   ]);
   const office = offices[0] as OfficeRow | undefined;
   if (!office) throw new Error("The office record is missing.");
@@ -187,8 +204,8 @@ async function queryDirectory() {
           endMinutes: Number(row.end_minutes),
         }),
       ),
-      holidays: (holidays as Array<{ id: string; date: string; name: string }>).map(
-        (row): Holiday => ({ id: row.id, date: row.date, name: row.name }),
+      holidays: (holidays as Array<{ id: string; date: string; name: string; yearly: boolean }>).map(
+        (row): Holiday => ({ id: row.id, date: row.date, name: row.name, yearly: Boolean(row.yearly) }),
       ),
     },
   };
@@ -226,16 +243,89 @@ export function teamName(teams: Team[], teamId: string | null) {
 
 export const getDirectory = cache(() => loadDirectory());
 
+async function clearAbsentOnDates(dates: string[]) {
+  if (dates.length === 0) return false;
+  await ensure();
+  const sql = db();
+  let cleared = false;
+  for (const date of dates) {
+    const rows = await sql`
+      DELETE FROM attendance
+      WHERE status = 'ABSENT' AND date = ${date}
+      RETURNING id
+    `;
+    if (rows.length) cleared = true;
+  }
+  return cleared;
+}
+
+async function clearAbsentOnHolidays(holidays: Holiday[], month?: string) {
+  if (holidays.length === 0) return false;
+  await ensure();
+  const sql = db();
+  let cleared = false;
+
+  for (const holiday of holidays) {
+    if (holiday.yearly) {
+      const monthDay = holidayMonthDay(holiday.date);
+      const rows = month
+        ? await sql`
+            DELETE FROM attendance
+            WHERE status = 'ABSENT'
+              AND date >= ${`${month}-01`}
+              AND date <= ${`${month}-31`}
+              AND right(date, 5) = ${monthDay}
+            RETURNING id
+          `
+        : await sql`
+            DELETE FROM attendance
+            WHERE status = 'ABSENT' AND right(date, 5) = ${monthDay}
+            RETURNING id
+          `;
+      if (rows.length) cleared = true;
+      continue;
+    }
+    if (month && !holiday.date.startsWith(`${month}-`)) continue;
+    const rows = await sql`
+      DELETE FROM attendance
+      WHERE status = 'ABSENT' AND date = ${holiday.date}
+      RETURNING id
+    `;
+    if (rows.length) cleared = true;
+  }
+
+  return cleared;
+}
+
+async function clearAbsentOnSecondFourthSaturdays(month?: string) {
+  await ensure();
+  const sql = db();
+  const rows = month
+    ? ((await sql`
+        SELECT DISTINCT date FROM attendance
+        WHERE status = 'ABSENT'
+          AND date >= ${`${month}-01`}
+          AND date <= ${`${month}-31`}
+      `) as Array<{ date: string }>)
+    : ((await sql`SELECT DISTINCT date FROM attendance WHERE status = 'ABSENT'`) as Array<{ date: string }>);
+  const dates = rows.map((row) => row.date).filter(isSecondOrFourthSaturday);
+  return clearAbsentOnDates(dates);
+}
+
 async function ensureAbsences(month: string) {
   const directory = await getDirectory();
   const office = directory.office;
+  const clearedHolidays = await clearAbsentOnHolidays(office.holidays, month);
+  const clearedSaturdays = office.secondFourthSaturdayOff ? await clearAbsentOnSecondFourthSaturdays(month) : false;
+  const cleared = clearedHolidays || clearedSaturdays;
   const today = officeDate(office.timezone);
   const nowMinutes = officeMinutes(office.timezone, new Date());
-  const closedDays = daysOfMonth(month).filter((date) => dayIsClosed(date, today, nowMinutes, office.workDays, office.holidays));
-  if (closedDays.length === 0) return false;
+  const closedDays = daysOfMonth(month).filter((date) =>
+    dayIsClosed(date, today, nowMinutes, office.workDays, office.holidays, office.secondFourthSaturdayOff),
+  );
 
   const active = directory.employees.filter((employee) => employee.active);
-  if (active.length === 0) return false;
+  if (closedDays.length === 0 || active.length === 0) return cleared;
 
   const existing = await queryMonth(month);
   const present = new Set(existing.map((record) => `${record.employeeId}\0${record.date}`));
@@ -243,6 +333,8 @@ async function ensureAbsences(month: string) {
 
   for (const employee of active) {
     for (const date of closedDays) {
+      if (!isExpected(date, office.workDays, office.holidays, office.secondFourthSaturdayOff)) continue;
+      if (holidayOn(date, office.holidays)) continue;
       const key = `${employee.id}\0${date}`;
       if (present.has(key)) continue;
       inserts.push({
@@ -259,7 +351,7 @@ async function ensureAbsences(month: string) {
     }
   }
 
-  if (inserts.length === 0) return false;
+  if (inserts.length === 0) return cleared;
 
   await ensure();
   const sql = db();
@@ -285,7 +377,7 @@ async function ensureAbsences(month: string) {
 export const getMonthAttendance = cache(async (month: string) => {
   const wrote = await ensureAbsences(month);
   if (wrote) {
-    expire("attendance");
+    expireAfter("attendance");
     return queryMonth(month);
   }
   return loadMonth(month);
@@ -341,10 +433,18 @@ export async function getOffice() {
   return (await getDirectory()).office;
 }
 
-export async function saveSchedule(input: { workDays: WorkDay[]; holidays: Array<Pick<Holiday, "date" | "name">> }) {
+export async function saveSchedule(input: {
+  workDays: WorkDay[];
+  holidays: Array<Pick<Holiday, "date" | "name" | "yearly">>;
+  secondFourthSaturdayOff: boolean;
+}) {
   await ensure();
   const sql = db();
   await sql.transaction([
+    sql`
+      UPDATE office
+      SET second_fourth_saturday_off = ${input.secondFourthSaturdayOff}
+    `,
     ...input.workDays.map(
       (day) => sql`
         INSERT INTO work_days (weekday, working, start_minutes, end_minutes)
@@ -358,12 +458,34 @@ export async function saveSchedule(input: { workDays: WorkDay[]; holidays: Array
     sql`DELETE FROM holidays`,
     ...input.holidays.map(
       (holiday) => sql`
-        INSERT INTO holidays (id, date, name)
-        VALUES (${crypto.randomUUID()}, ${holiday.date}, ${holiday.name})
+        INSERT INTO holidays (id, date, name, yearly)
+        VALUES (${crypto.randomUUID()}, ${holiday.date}, ${holiday.name}, ${holiday.yearly})
       `,
     ),
   ]);
   expire("directory");
+  const holidays: Holiday[] = input.holidays.map((holiday) => ({
+    id: crypto.randomUUID(),
+    date: holiday.date,
+    name: holiday.name,
+    yearly: holiday.yearly,
+  }));
+  const clearedHolidays = await clearAbsentOnHolidays(holidays);
+  const clearedSaturdays = input.secondFourthSaturdayOff ? await clearAbsentOnSecondFourthSaturdays() : false;
+  if (clearedHolidays || clearedSaturdays) expire("attendance");
+}
+
+export async function refreshOfficePublicIp(ip: string) {
+  if (!ip) return;
+  await ensure();
+  const sql = db();
+  const rows = (await sql`
+    UPDATE office
+    SET public_ip = ${ip}
+    WHERE public_ip IS DISTINCT FROM ${ip}
+    RETURNING id
+  `) as Array<{ id: string }>;
+  if (rows.length) expire("directory");
 }
 
 export async function saveOffice(next: Pick<Office, "name" | "latitude" | "longitude" | "allowedRadiusMeters" | "publicIp" | "requireOfficeNetwork">) {
@@ -377,7 +499,7 @@ export async function saveOffice(next: Pick<Office, "name" | "latitude" | "longi
         allowed_radius_meters = ${next.allowedRadiusMeters},
         public_ip = ${next.publicIp},
         require_office_network = ${next.requireOfficeNetwork}
-    RETURNING id, name, latitude, longitude, allowed_radius_meters, timezone, public_ip, require_office_network
+    RETURNING id, name, latitude, longitude, allowed_radius_meters, timezone, public_ip, require_office_network, second_fourth_saturday_off
   `) as OfficeRow[];
   const office = rows[0];
   if (!office) throw new Error("The office record is missing.");
@@ -391,7 +513,13 @@ export async function markCheckIn(input: { employeeId: string; distanceMeters: n
 
   const now = new Date();
   const date = officeDate(office.timezone, now);
-  const status: AttendanceStatus = arrivalStatus(officeMinutes(office.timezone, now), date, office.workDays, office.holidays);
+  const status: AttendanceStatus = arrivalStatus(
+    officeMinutes(office.timezone, now),
+    date,
+    office.workDays,
+    office.holidays,
+    office.secondFourthSaturdayOff,
+  );
   const rows = (await sql`
     INSERT INTO attendance (
       id, employee_id, office_id, date, check_in_at, check_out_at,

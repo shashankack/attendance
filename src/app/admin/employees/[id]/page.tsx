@@ -79,7 +79,15 @@ export default async function EmployeeDetailPage({
         <p className="text-sm text-muted-foreground">P is on time, L is late, and A is absent. Days off and holidays are blank.</p>
       </div>
       <div className="mt-4">
-        <MonthCalendar month={month} today={today} timeZone={office.timezone} records={records} workDays={office.workDays} holidays={office.holidays} />
+        <MonthCalendar
+          month={month}
+          today={today}
+          timeZone={office.timezone}
+          records={records}
+          workDays={office.workDays}
+          holidays={office.holidays}
+          secondFourthSaturdayOff={office.secondFourthSaturdayOff}
+        />
       </div>
       <div className="mt-8">
         <EmployeeEditor

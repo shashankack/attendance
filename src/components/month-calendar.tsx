@@ -1,4 +1,4 @@
-import { holidayOn, isExpected } from "@/lib/schedule";
+import { dayOffLabel, isExpected } from "@/lib/schedule";
 import { cn } from "@/lib/utils";
 import { daysOfMonth, formatClock } from "@/lib/time";
 import type { Attendance, Holiday, WorkDay } from "@/lib/types";
@@ -17,6 +17,7 @@ export function MonthCalendar({
   records,
   workDays,
   holidays,
+  secondFourthSaturdayOff,
 }: {
   month: string;
   today: string;
@@ -24,6 +25,7 @@ export function MonthCalendar({
   records: Attendance[];
   workDays: WorkDay[];
   holidays: Holiday[];
+  secondFourthSaturdayOff: boolean;
 }) {
   const days = daysOfMonth(month);
   const byDate = new Map(records.map((record) => [record.date, record]));
@@ -41,19 +43,19 @@ export function MonthCalendar({
       ))}
       {days.map((date) => {
         const record = byDate.get(date);
-        const holiday = holidayOn(date, holidays);
-        const off = !isExpected(date, workDays, holidays);
+        const offLabel = dayOffLabel(date, holidays, secondFourthSaturdayOff);
+        const off = !isExpected(date, workDays, holidays, secondFourthSaturdayOff);
         const future = date > today;
         const label = future
           ? ""
-          : record?.status === "LATE"
-            ? "L"
-            : record?.status === "PRESENT"
-              ? "P"
-              : record?.status === "ABSENT"
-                ? "A"
-                : off
-                  ? ""
+          : off
+            ? ""
+            : record?.status === "LATE"
+              ? "L"
+              : record?.status === "PRESENT"
+                ? "P"
+                : record?.status === "ABSENT"
+                  ? "A"
                   : "–";
         const chip =
           label === "L"
@@ -79,8 +81,8 @@ export function MonthCalendar({
                 <span className={cn("inline-flex size-6 items-center justify-center rounded-md text-[11px] font-medium", chip)}>{label}</span>
               ) : null}
             </div>
-            {holiday && (!record || record.status === "ABSENT") ? (
-              <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">{holiday.name}</p>
+            {offLabel && (!record || record.status === "ABSENT" || off) ? (
+              <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-muted-foreground">{offLabel}</p>
             ) : null}
             {record?.checkInAt ? (
               <p className="mt-auto pt-2 text-[11px] leading-4 text-muted-foreground">

@@ -38,6 +38,7 @@ export type Holiday = {
   id: string;
   date: string;
   name: string;
+  yearly: boolean;
 };
 
 export type Office = {
@@ -49,6 +50,7 @@ export type Office = {
   timezone: string;
   publicIp: string;
   requireOfficeNetwork: boolean;
+  secondFourthSaturdayOff: boolean;
   workDays: WorkDay[];
   holidays: Holiday[];
 };

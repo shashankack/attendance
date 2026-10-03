@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 
 import { distanceMeters } from "./geo";
+import { ipMatchesOffice } from "./network";
 import { readSession, signSession } from "./session";
 import {
   bindEmployeeDevice,
@@ -21,6 +22,7 @@ import {
   getOffice,
   markCheckIn,
   markCheckOut,
+  refreshOfficePublicIp,
   renameTeam,
   replaceSession,
   saveOffice,
@@ -185,8 +187,11 @@ async function wifiBlock() {
   const office = await getOffice();
   if (!office.requireOfficeNetwork) return null;
   const ip = await clientIp();
-  if (!office.publicIp || ip !== office.publicIp) {
+  if (!office.publicIp || !ipMatchesOffice(ip, office.publicIp)) {
     return "Connect to the office Wi-Fi before marking attendance.";
+  }
+  if (ip !== office.publicIp && isPublicAddress(ip)) {
+    await refreshOfficePublicIp(ip);
   }
   return null;
 }
@@ -202,7 +207,7 @@ export async function onOfficeWifi() {
   const office = await getOffice();
   if (!office.requireOfficeNetwork) return true;
   const ip = await clientIp();
-  return Boolean(office.publicIp) && ip === office.publicIp;
+  return Boolean(office.publicIp) && ipMatchesOffice(ip, office.publicIp);
 }
 
 function locationError(distance: number, radius: number) {
@@ -321,11 +326,16 @@ export async function updateOffice(input: {
 
 export async function updateSchedule(input: {
   workDays: WorkDay[];
-  holidays: Array<Pick<Holiday, "date" | "name">>;
+  holidays: Array<Pick<Holiday, "date" | "name" | "yearly">>;
+  secondFourthSaturdayOff: boolean;
 }): Promise<ActionResult> {
   if (!(await liveAdmin())) return { ok: false, message: "Only an admin can change the schedule." };
 
-  const workDays = filledWorkDays(input.workDays);
+  const secondFourthSaturdayOff = input.secondFourthSaturdayOff === true;
+  let workDays = filledWorkDays(input.workDays);
+  if (secondFourthSaturdayOff) {
+    workDays = workDays.map((day) => (day.weekday === 6 ? { ...day, working: true } : day));
+  }
   if (!workDays.some((day) => day.working)) {
     return { ok: false, message: "Choose at least one working day." };
   }
@@ -345,16 +355,30 @@ export async function updateSchedule(input: {
     }
   }
 
-  const holidays = input.holidays.map((holiday) => ({ date: holiday.date.trim(), name: holiday.name.trim() }));
-  const seen = new Set<string>();
+  const holidays = input.holidays.map((holiday) => ({
+    date: holiday.date.trim(),
+    name: holiday.name.trim(),
+    yearly: holiday.yearly === true,
+  }));
+  const seenOnce = new Set<string>();
+  const seenYearly = new Set<string>();
   for (const holiday of holidays) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(holiday.date)) return { ok: false, message: "Enter a holiday date." };
     if (!holiday.name || holiday.name.length > 80) return { ok: false, message: "A holiday needs a name of up to 80 characters." };
-    if (seen.has(holiday.date)) return { ok: false, message: "That date is already a holiday." };
-    seen.add(holiday.date);
+    if (holiday.yearly) {
+      const key = holiday.date.slice(5);
+      if (seenYearly.has(key)) return { ok: false, message: "That day already repeats every year." };
+      if (seenOnce.has(holiday.date)) return { ok: false, message: "That date is already a holiday." };
+      seenYearly.add(key);
+    } else {
+      if (seenOnce.has(holiday.date) || seenYearly.has(holiday.date.slice(5))) {
+        return { ok: false, message: "That date is already a holiday." };
+      }
+      seenOnce.add(holiday.date);
+    }
   }
 
-  await saveSchedule({ workDays, holidays });
+  await saveSchedule({ workDays, holidays, secondFourthSaturdayOff });
   return { ok: true };
 }
 

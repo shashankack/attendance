@@ -165,7 +165,7 @@ export function OfficeEditor({ office }: { office: Office }) {
               </Button>
             </div>
             <p className="text-sm text-muted-foreground">
-              Join the office Wi-Fi on this phone or computer, then press Use this Wi-Fi. The address is filled in for you.
+              Join the office Wi-Fi on this phone or computer, then press Use this Wi-Fi. Dynamic ISP addresses are fine — matching uses the ISP block (/16), and the saved address updates when people mark attendance from the office.
             </p>
           </div>
           <label className="flex items-center gap-2 text-sm sm:col-span-2">

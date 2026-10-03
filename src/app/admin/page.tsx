@@ -112,7 +112,12 @@ export default async function AdminPage() {
       <div className="mt-8">
         <OfficeEditor office={directory.office} />
         <div className="mt-8">
-          <ScheduleEditor timeZone={directory.office.timezone} workDays={directory.office.workDays} holidays={directory.office.holidays} />
+          <ScheduleEditor
+            timeZone={directory.office.timezone}
+            workDays={directory.office.workDays}
+            holidays={directory.office.holidays}
+            secondFourthSaturdayOff={directory.office.secondFourthSaturdayOff}
+          />
         </div>
       </div>
     </Shell>

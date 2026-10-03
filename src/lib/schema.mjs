@@ -20,8 +20,14 @@ const statements = [
     allowed_radius_meters integer NOT NULL,
     timezone text NOT NULL,
     public_ip text NOT NULL DEFAULT '',
-    require_office_network boolean NOT NULL DEFAULT false
+    require_office_network boolean NOT NULL DEFAULT false,
+    second_fourth_saturday_off boolean NOT NULL DEFAULT true
   )`,
+  `ALTER TABLE office ADD COLUMN IF NOT EXISTS second_fourth_saturday_off boolean NOT NULL DEFAULT true`,
+  `UPDATE work_days
+   SET working = true
+   WHERE weekday = 6
+     AND EXISTS (SELECT 1 FROM office WHERE second_fourth_saturday_off = true)`,
   `CREATE TABLE IF NOT EXISTS employees (
     id text PRIMARY KEY,
     code text NOT NULL,
@@ -64,8 +70,10 @@ const statements = [
   `CREATE TABLE IF NOT EXISTS holidays (
     id text PRIMARY KEY,
     date text NOT NULL UNIQUE,
-    name text NOT NULL
+    name text NOT NULL,
+    yearly boolean NOT NULL DEFAULT false
   )`,
+  `ALTER TABLE holidays ADD COLUMN IF NOT EXISTS yearly boolean NOT NULL DEFAULT false`,
   `INSERT INTO work_days (weekday, working, start_minutes, end_minutes)
    SELECT v.weekday, v.working, v.start_minutes, v.end_minutes
    FROM (VALUES
@@ -75,7 +83,7 @@ const statements = [
      (3, true, 600, 1080),
      (4, true, 600, 1080),
      (5, true, 600, 1080),
-     (6, false, 600, 1080)
+     (6, true, 600, 1080)
    ) AS v(weekday, working, start_minutes, end_minutes)
    WHERE NOT EXISTS (SELECT 1 FROM work_days)`,
 ];

@@ -52,7 +52,15 @@ export default async function MyAttendancePage({
         <p className="text-sm text-muted-foreground">P is on time, L is late, and A is absent. Days off and holidays are blank.</p>
       </div>
       <div className="mt-4">
-        <MonthCalendar month={month} today={today} timeZone={directory.office.timezone} records={records} workDays={directory.office.workDays} holidays={directory.office.holidays} />
+        <MonthCalendar
+          month={month}
+          today={today}
+          timeZone={directory.office.timezone}
+          records={records}
+          workDays={directory.office.workDays}
+          holidays={directory.office.holidays}
+          secondFourthSaturdayOff={directory.office.secondFourthSaturdayOff}
+        />
       </div>
     </Shell>
   );

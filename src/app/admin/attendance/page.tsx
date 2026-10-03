@@ -33,7 +33,12 @@ export default async function MonthlyAttendancePage({
     const records = attendance.filter((record) => record.employeeId === employee.id);
     const byDate = new Map(records.map((record) => [record.date, record]));
     const absent = days.filter((date) => {
-      if (date > today || !isExpected(date, directory.office.workDays, directory.office.holidays)) return false;
+      if (
+        date > today ||
+        !isExpected(date, directory.office.workDays, directory.office.holidays, directory.office.secondFourthSaturdayOff)
+      ) {
+        return false;
+      }
       const record = byDate.get(date);
       return !record || record.status === "ABSENT";
     }).length;
@@ -91,7 +96,10 @@ export default async function MonthlyAttendancePage({
             <tr className="text-muted-foreground">
               <th className="sticky left-0 bg-card px-3 py-3 text-left font-medium">Employee</th>
               {days.map((date) => (
-                <th key={date} className={`px-1 py-3 font-medium ${isExpected(date, directory.office.workDays, directory.office.holidays) ? "" : "text-border"}`}>
+                <th
+                  key={date}
+                  className={`px-1 py-3 font-medium ${isExpected(date, directory.office.workDays, directory.office.holidays, directory.office.secondFourthSaturdayOff) ? "" : "text-border"}`}
+                >
                   {Number(date.slice(8))}
                 </th>
               ))}
@@ -105,18 +113,23 @@ export default async function MonthlyAttendancePage({
                 </th>
                 {days.map((date) => {
                   const record = row.byDate.get(date);
-                  const off = !isExpected(date, directory.office.workDays, directory.office.holidays);
+                  const off = !isExpected(
+                    date,
+                    directory.office.workDays,
+                    directory.office.holidays,
+                    directory.office.secondFourthSaturdayOff,
+                  );
                   const label =
                     date > today
                       ? ""
-                      : record?.status === "LATE"
-                        ? "L"
-                        : record?.status === "PRESENT"
-                          ? "P"
-                          : record?.status === "ABSENT"
-                            ? "A"
-                            : off
-                              ? ""
+                      : off
+                        ? ""
+                        : record?.status === "LATE"
+                          ? "L"
+                          : record?.status === "PRESENT"
+                            ? "P"
+                            : record?.status === "ABSENT"
+                              ? "A"
                               : "–";
                   const chip =
                     label === "L"
